@@ -1,0 +1,10 @@
+# Websites for face recognition scraping
+# One URL per line
+# Lines starting with # are ignored
+
+# Your website
+https://ceylon-trails-voyage.lovable.app/
+
+
+
+

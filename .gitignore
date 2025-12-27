@@ -1,0 +1,81 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Database files (keep structure, ignore data)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+face_recognition.db
+
+# FAISS index files (can be regenerated)
+faiss_index.bin
+
+# User uploads (temporary files)
+User/backend/uploads/*
+!User/backend/uploads/.gitkeep
+
+# Logs
+*.log
+batch_processing.log
+
+# Backup files
+*.backup
+*.backup_*
+*_backup
+*.bak
+
+# Old/temporary files
+*_old.*
+*.old
+*.tmp
+*.temp
+batch_processing.log
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Specific files to ignore
+analyze_*.py
+check_*.py
+cleanup_*.py
+migrate_*.py
+test_*.py
+verify_*.py
+reset_*.py
+deduplicate_*.py
+drop_*.py
+setup.py
+
+# Old schemas
+database_schema.sql
+database_schema_v2.sql
+
+# Documentation that's not needed
+CLUSTERING*.txt
+DATABASE_FIXES.md
+DEDUPLICATION_SUMMARY.md
+MIGRATION_COMPLETE.md
+
+# Duplicate database in User backend
+User/backend/face_recognition.db

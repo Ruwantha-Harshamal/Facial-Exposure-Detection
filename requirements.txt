@@ -1,0 +1,21 @@
+# Core Dependencies
+numpy>=1.24.0
+Pillow>=10.0.0
+requests>=2.31.0
+
+# Web Scraping
+selenium>=4.15.0
+
+# Face Detection & Recognition
+mtcnn>=0.1.1
+keras-facenet>=0.3.2
+tensorflow>=2.14.0
+
+# FAISS for Similarity Search
+faiss-cpu>=1.7.4  # Use faiss-gpu if you have CUDA
+
+# Database
+psycopg2-binary>=2.9.9  # PostgreSQL (optional)
+
+# Utilities
+python-dateutil>=2.8.2

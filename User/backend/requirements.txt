@@ -1,0 +1,9 @@
+# Flask Backend Requirements
+# Add this to your existing project requirements
+
+Flask==3.0.0
+Werkzeug==3.0.1
+
+# Note: All other packages (TensorFlow, MTCNN, FAISS, etc.) 
+# are already installed from your main requirements.txt
+# This backend reuses those packages!

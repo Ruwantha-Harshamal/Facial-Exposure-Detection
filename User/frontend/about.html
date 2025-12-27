@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About - Privacy Exposure Checker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="css/style.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">🔒 Privacy Exposure Checker</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="about.html">About</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Content -->
+    <div class="container mt-5 mb-5">
+        <div class="row">
+            <div class="col-lg-10 mx-auto">
+                <h1 class="mb-4">About Privacy Exposure Checker</h1>
+                
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h3>🎯 Purpose</h3>
+                        <p>
+                            This tool helps you discover if your face appears on websites you didn't know about.
+                            In today's digital age, photos can spread across the internet without your knowledge.
+                            This service allows you to check if your face has been exposed online.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h3>🔍 How It Works</h3>
+                        <ol>
+                            <li><strong>Database Building (Admin):</strong> We scrape public websites for images</li>
+                            <li><strong>Face Detection:</strong> MTCNN detects faces in all images</li>
+                            <li><strong>Embedding Generation:</strong> FaceNet creates unique face signatures</li>
+                            <li><strong>Indexing:</strong> FAISS indexes all face embeddings for fast search</li>
+                            <li><strong>User Upload:</strong> You upload your photo</li>
+                            <li><strong>Comparison:</strong> We compare your face against our database using AI</li>
+                            <li><strong>Results:</strong> You see where your face appears (if anywhere)</li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h3>🛡️ Privacy & Security</h3>
+                        <h5>What We DON'T Store:</h5>
+                        <ul>
+                            <li>❌ Your uploaded photos</li>
+                            <li>❌ Your face embeddings</li>
+                            <li>❌ Your IP address or identity</li>
+                            <li>❌ Any search history</li>
+                        </ul>
+                        
+                        <h5 class="mt-3">What We DO:</h5>
+                        <ul>
+                            <li>✅ Process your photo in RAM only</li>
+                            <li>✅ Delete your photo immediately after search (within 6 seconds)</li>
+                            <li>✅ Only show you publicly available information</li>
+                            <li>✅ Run everything locally (no third-party APIs)</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h3>🔧 Technology Stack</h3>
+                        <ul>
+                            <li><strong>MTCNN:</strong> Multi-task Cascaded Convolutional Networks for face detection</li>
+                            <li><strong>FaceNet:</strong> Deep learning model for face recognition</li>
+                            <li><strong>FAISS:</strong> Facebook AI Similarity Search for fast vector search</li>
+                            <li><strong>Flask:</strong> Python web framework</li>
+                            <li><strong>SQLite:</strong> Lightweight database for metadata</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h3>❓ FAQ</h3>
+                        
+                        <h5>Q: Is this tool accurate?</h5>
+                        <p>The system uses industry-standard face recognition technology (FaceNet) with high accuracy. However, no system is 100% perfect.</p>
+                        
+                        <h5>Q: What if I find my face online?</h5>
+                        <p>You can contact the website owners to request removal, or use legal channels like DMCA takedown requests.</p>
+                        
+                        <h5>Q: How often is the database updated?</h5>
+                        <p>The administrator periodically scrapes new websites to keep the database current.</p>
+                        
+                        <h5>Q: Can I request a website to be added?</h5>
+                        <p>Contact the system administrator to suggest websites for inclusion in the database.</p>
+                        
+                        <h5>Q: Is my uploaded photo really deleted?</h5>
+                        <p>Yes! Your photo exists on the server for only ~6 seconds during processing, then is permanently deleted. We have no way to recover it.</p>
+                    </div>
+                </div>
+
+                <div class="card mb-4 border-warning">
+                    <div class="card-body">
+                        <h3>⚠️ Disclaimer</h3>
+                        <p>
+                            This tool is for educational and privacy awareness purposes only. It only searches 
+                            websites that have been specifically indexed by the administrator. The absence of 
+                            results does not guarantee your face isn't elsewhere online. For comprehensive privacy 
+                            protection, consider reverse image search services and privacy consultants.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="text-center mt-5">
+                    <a href="/" class="btn btn-primary btn-lg">← Back to Search</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="mt-5 py-4 bg-dark text-white text-center">
+        <div class="container">
+            <p class="mb-0">Privacy Exposure Checker | Built with MTCNN + FaceNet + FAISS</p>
+            <small class="text-muted">For educational and privacy awareness purposes</small>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

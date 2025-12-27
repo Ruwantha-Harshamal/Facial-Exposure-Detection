@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Exposure Checker - Check if Your Face is Online</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="css/style.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">🔒 Privacy Exposure Checker</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="about.html">About</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <div class="hero-section">
+        <div class="container text-center">
+            <h1 class="display-4 mb-4">🔍 Check Your Privacy Exposure</h1>
+            <p class="lead mb-4">
+                Discover if your face has been exposed online without your knowledge
+            </p>
+            <p class="text-muted">
+                <span id="stats-faces">Loading...</span> faces indexed from 
+                <span id="stats-websites">...</span> websites
+            </p>
+        </div>
+    </div>
+
+    <!-- Upload Section -->
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="card shadow-lg">
+                    <div class="card-body p-5">
+                        <h2 class="text-center mb-4">Upload Your Photo</h2>
+                        
+                        <!-- Upload Form -->
+                        <form id="upload-form" enctype="multipart/form-data">
+                            <div class="upload-area" id="upload-area">
+                                <div class="upload-icon">📷</div>
+                                <h4>Drag & Drop Your Photo Here</h4>
+                                <p class="text-muted">or click to browse</p>
+                                <input type="file" id="photo-input" accept="image/jpeg,image/jpg,image/png" hidden>
+                                <button type="button" class="btn btn-primary mt-3" id="browse-btn">
+                                    Choose Photo
+                                </button>
+                            </div>
+
+                            <!-- Preview -->
+                            <div id="preview-area" class="mt-4" style="display: none;">
+                                <h5>Preview:</h5>
+                                <img id="preview-image" src="" alt="Preview" class="img-fluid rounded">
+                                <div class="mt-3">
+                                    <button type="submit" class="btn btn-success btn-lg w-100" id="check-btn">
+                                        🔍 Check My Privacy
+                                    </button>
+                                    <button type="button" class="btn btn-secondary mt-2 w-100" id="cancel-btn">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Loading -->
+                            <div id="loading-area" class="text-center mt-4" style="display: none;">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-3">Analyzing your photo...</p>
+                                <small class="text-muted">This may take a few seconds</small>
+                            </div>
+                        </form>
+
+                        <!-- Results Area -->
+                        <div id="results-area" style="display: none;"></div>
+
+                        <!-- Privacy Notice -->
+                        <div class="alert alert-info mt-4">
+                            <h6>🔐 Your Privacy is Protected</h6>
+                            <small>
+                                • Your photo is processed locally and deleted immediately after search<br>
+                                • We don't store any user photos or personal information<br>
+                                • No tracking or analytics
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="mt-5 py-4 bg-dark text-white text-center">
+        <div class="container">
+            <p class="mb-0">Privacy Exposure Checker | Built with MTCNN + FaceNet + FAISS</p>
+            <small class="text-muted">For educational and privacy awareness purposes</small>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
