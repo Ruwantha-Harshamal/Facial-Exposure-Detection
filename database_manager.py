@@ -1,8 +1,8 @@
 """
 database_manager.py
 
-Database Manager for OSINT Face Recognition System
-Handles all database operations (SQLite/PostgreSQL)
+Database Manager for Face Recognition System
+Handles all SQLite database operations
 """
 
 import os
@@ -18,7 +18,7 @@ from PIL import Image
 class DatabaseManager:
     """
     Manages database operations for face recognition system.
-    Supports SQLite and PostgreSQL.
+    Uses SQLite for data storage.
     """
     
     def __init__(self, db_path: str = "face_recognition.db", db_type: str = "sqlite"):
@@ -26,8 +26,8 @@ class DatabaseManager:
         Initialize database manager.
         
         Args:
-            db_path: Path to database file (SQLite) or connection string (PostgreSQL)
-            db_type: 'sqlite' or 'postgresql'
+            db_path: Path to SQLite database file
+            db_type: Database type (only 'sqlite' supported)
         """
         self.db_path = db_path
         self.db_type = db_type
@@ -37,21 +37,14 @@ class DatabaseManager:
     
     def _connect(self):
         """Establish database connection."""
-        if self.db_type == "sqlite":
-            self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            self.conn.row_factory = sqlite3.Row  # Return rows as dictionaries
-        elif self.db_type == "postgresql":
-            import psycopg2
-            self.conn = psycopg2.connect(self.db_path)
-        else:
-            raise ValueError(f"Unsupported database type: {self.db_type}")
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.conn.row_factory = sqlite3.Row  # Return rows as dictionaries
     
     def _create_tables(self):
-        """Create all required tables."""
-        # Find schema file - check if it's in the same directory or use absolute path
+        """Create all required tables from schema file."""
+        # Find schema file
         schema_path = 'database_schema_v3.sql'
         if not os.path.exists(schema_path):
-            # Try in the script's directory
             script_dir = os.path.dirname(os.path.abspath(__file__))
             schema_path = os.path.join(script_dir, 'database_schema_v3.sql')
         
@@ -59,7 +52,7 @@ class DatabaseManager:
             schema = f.read()
         
         cursor = self.conn.cursor()
-        cursor.executescript(schema) if self.db_type == "sqlite" else cursor.execute(schema)
+        cursor.executescript(schema)
         self.conn.commit()
     
     # ========================================
@@ -96,8 +89,8 @@ class DatabaseManager:
         """Update website scraping status."""
         cursor = self.conn.cursor()
         cursor.execute(
-            "UPDATE websites SET status = ?, total_images = ? WHERE id = ?",
-            (status, total_images, website_id)
+            "UPDATE websites SET status = ?, total_images = ?, total_faces = ? WHERE id = ?",
+            (status, total_images, total_faces, website_id)
         )
         self.conn.commit()
     
@@ -245,13 +238,13 @@ class DatabaseManager:
         return None
     
     # ========================================
-    # EMBEDDING OPERATIONS (v2 schema - embeddings stored in faces table)
+    # EMBEDDING OPERATIONS
     # ========================================
     
     def add_embedding(self, face_id: int, embedding_vector: np.ndarray,
                      model: str = "FaceNet", dimensions: int = 512) -> int:
         """
-        Add/Update face embedding in embeddings table (v3 schema).
+        Add/Update face embedding in embeddings table.
         
         Args:
             face_id: ID of face
@@ -260,17 +253,17 @@ class DatabaseManager:
             dimensions: Vector dimensions
             
         Returns:
-            face_id (updated row)
+            face_id
         """
+        import hashlib
+        
         # Serialize numpy array to bytes
         embedding_bytes = pickle.dumps(embedding_vector)
         
         # Calculate hash for deduplication
-        import hashlib
         embedding_hash = hashlib.sha256(embedding_bytes).hexdigest()
         
         cursor = self.conn.cursor()
-        # Insert into embeddings table (v3 schema)
         cursor.execute(
             """INSERT OR REPLACE INTO embeddings 
                (face_id, embedding_vector, embedding_model, embedding_dimensions, embedding_hash)
@@ -282,7 +275,7 @@ class DatabaseManager:
     
     def get_embedding(self, face_id: int) -> Optional[np.ndarray]:
         """
-        Get face embedding as numpy array from faces table (v2 schema).
+        Get face embedding as numpy array.
         
         Args:
             face_id: ID of face
@@ -333,7 +326,7 @@ class DatabaseManager:
     
     def get_all_embeddings(self, limit: int = None) -> List[Tuple[int, np.ndarray]]:
         """
-        Get all embeddings from faces table (v2 schema).
+        Get all embeddings from database.
         
         Args:
             limit: Maximum number of embeddings to return
@@ -362,33 +355,6 @@ class DatabaseManager:
     # QUERY OPERATIONS
     # ========================================
     
-    def get_face_details(self, face_id: int) -> Optional[Dict]:
-        """Get complete face information."""
-        cursor = self.conn.cursor()
-        cursor.execute(
-            "SELECT * FROM v_faces_complete WHERE face_id = ?",
-            (face_id,)
-        )
-        row = cursor.fetchone()
-        return dict(row) if row else None
-    
-    def get_all_faces(self, website_id: int = None, limit: int = None) -> List[Dict]:
-        """Get all faces with complete information."""
-        cursor = self.conn.cursor()
-        
-        query = "SELECT * FROM v_faces_complete"
-        params = []
-        
-        if website_id:
-            query += " WHERE website_id = ?"
-            params.append(website_id)
-        
-        if limit:
-            query += f" LIMIT {limit}"
-        
-        cursor.execute(query, params)
-        return [dict(row) for row in cursor.fetchall()]
-    
     def get_statistics(self) -> Dict:
         """Get database statistics."""
         cursor = self.conn.cursor()
@@ -396,77 +362,6 @@ class DatabaseManager:
         row = cursor.fetchone()
         return dict(row) if row else {}
     
-    def search_similar_faces(self, query_embedding: np.ndarray, threshold: float = 0.6) -> List[Dict]:
-        """
-        Search for similar faces using cosine similarity.
-        Note: This is a basic implementation. For large datasets, use FAISS.
-        
-        Args:
-            query_embedding: Query embedding vector
-            threshold: Similarity threshold (0-1)
-            
-        Returns:
-            List of matching faces with similarity scores
-        """
-        all_embeddings = self.get_all_embeddings()
-        results = []
-        
-        for face_id, embedding in all_embeddings:
-            # Calculate cosine similarity
-            similarity = 1 - np.dot(query_embedding, embedding) / (
-                np.linalg.norm(query_embedding) * np.linalg.norm(embedding)
-            )
-            
-            if similarity >= threshold:
-                face_details = self.get_face_details(face_id)
-                face_details['similarity'] = float(similarity)
-                results.append(face_details)
-        
-        # Sort by similarity (highest first)
-        results.sort(key=lambda x: x['similarity'], reverse=True)
-        return results
-    
-    # ========================================
-    # CLUSTERING OPERATIONS
-    # ========================================
-    
-    def get_cluster_statistics(self) -> Dict:
-        """Get clustering statistics."""
-        cursor = self.conn.cursor()
-        
-        cursor.execute("SELECT COUNT(*) FROM face_clusters")
-        total_clusters = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM face_cluster_members")
-        total_members = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT AVG(face_count) FROM face_clusters")
-        avg_cluster_size = cursor.fetchone()[0] or 0
-        
-        return {
-            'total_clusters': total_clusters,
-            'total_clustered_faces': total_members,
-            'avg_cluster_size': float(avg_cluster_size)
-        }
-    
-    def get_face_cluster(self, face_id: int) -> Optional[int]:
-        """
-        Get the cluster ID for a given face.
-        
-        Args:
-            face_id: ID of the face
-            
-        Returns:
-            cluster_id or None if face is not in any cluster
-        """
-        cursor = self.conn.cursor()
-        cursor.execute(
-            "SELECT cluster_id FROM face_cluster_members WHERE face_id = ?",
-            (face_id,)
-        )
-        row = cursor.fetchone()
-        return row[0] if row else None
-
     # ========================================
     # UTILITY OPERATIONS
     # ========================================
@@ -483,49 +378,3 @@ class DatabaseManager:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
         self.close()
-
-
-# ========================================
-# EXAMPLE USAGE
-# ========================================
-
-if __name__ == "__main__":
-    # Initialize database
-    db = DatabaseManager("face_recognition.db")
-    
-    # Add a website
-    website_id = db.add_website("https://example.com")
-    print(f"Added website with ID: {website_id}")
-    
-    # Add an image
-    image_id = db.add_image(
-        website_id=website_id,
-        image_url="https://example.com/image.jpg",
-        filename="image.jpg",
-        width=1920,
-        height=1080
-    )
-    print(f"Added image with ID: {image_id}")
-    
-    # Add a face
-    face_id = db.add_face(
-        image_id=image_id,
-        bbox=(100, 100, 200, 200),
-        confidence=0.95
-    )
-    print(f"Added face with ID: {face_id}")
-    
-    # Add embedding
-    dummy_embedding = np.random.rand(128)
-    embedding_id = db.add_embedding(face_id, dummy_embedding)
-    print(f"Added embedding with ID: {embedding_id}")
-    
-    # Get statistics
-    stats = db.get_statistics()
-    print(f"\nDatabase Statistics:")
-    print(f"Total Websites: {stats.get('active_websites', 0)}")
-    print(f"Total Images: {stats.get('active_images', 0)}")
-    print(f"Total Faces: {stats.get('active_faces', 0)}")
-    print(f"Total Embeddings: {stats.get('active_embeddings', 0)}")
-    
-    db.close()

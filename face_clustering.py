@@ -7,9 +7,13 @@ Uses DBSCAN to identify faces belonging to the same person.
 
 import logging
 import numpy as np
-from sklearn.cluster import DBSCAN
-from typing import Dict, List, Tuple
+from typing import Dict, List
 import pickle
+
+try:
+    from sklearn.cluster import DBSCAN  # type: ignore
+except ImportError:
+    DBSCAN = None
 
 import config
 
@@ -30,7 +34,11 @@ def cluster_faces(db, threshold: float = 0.6, min_samples: int = 2) -> Dict[int,
     Returns:
         Dictionary mapping cluster_id -> list of face_ids
     """
-    logger.info(f"Starting face clustering with threshold={threshold}, min_samples={min_samples}")
+    if DBSCAN is None:
+        logger.error("scikit-learn not installed. Install with: pip install scikit-learn")
+        return {}
+    
+    logger.info("Starting face clustering with threshold=%.2f, min_samples=%d", threshold, min_samples)
     
     # Get all embeddings from database
     embeddings_data = db.get_all_embeddings()
@@ -39,7 +47,7 @@ def cluster_faces(db, threshold: float = 0.6, min_samples: int = 2) -> Dict[int,
         logger.warning("No embeddings found in database. Skipping clustering.")
         return {}
     
-    logger.info(f"Retrieved {len(embeddings_data)} embeddings from database")
+    logger.info("Retrieved %d embeddings from database", len(embeddings_data))
     
     # Separate face_ids and embeddings
     face_ids = [face_id for face_id, _ in embeddings_data]
@@ -62,7 +70,7 @@ def cluster_faces(db, threshold: float = 0.6, min_samples: int = 2) -> Dict[int,
     n_clusters = len(unique_labels) - (1 if -1 in unique_labels else 0)
     n_noise = list(labels).count(-1)
     
-    logger.info(f"Clustering complete: {n_clusters} clusters, {n_noise} noise points")
+    logger.info("Clustering complete: %d clusters, %d noise points", n_clusters, n_noise)
     
     # Group faces by cluster
     clusters = {}
@@ -86,7 +94,7 @@ def save_clusters_to_database(db, clusters: Dict[int, List[int]]):
         db: DatabaseManager instance
         clusters: Dictionary mapping cluster_label -> list of face_ids
     """
-    logger.info(f"Saving {len(clusters)} clusters to database...")
+    logger.info("Saving %d clusters to database...", len(clusters))
     
     cursor = db.conn.cursor()
     
@@ -131,7 +139,7 @@ def save_clusters_to_database(db, clusters: Dict[int, List[int]]):
                     (cluster_id, face_id, similarity)
                 )
         
-        logger.info(f"Created cluster {cluster_id} with {len(face_ids)} faces")
+        logger.info("Created cluster %d with %d faces", cluster_id, len(face_ids))
     
     db.conn.commit()
     logger.info("All clusters saved to database")
@@ -186,105 +194,32 @@ def auto_cluster(db, threshold: float = 0.6, min_samples: int = 2, clear_existin
     logger.info("=" * 70)
     logger.info("CLUSTERING SUMMARY")
     logger.info("=" * 70)
-    logger.info(f"Total clusters created: {len(clusters)}")
+    logger.info("Total clusters created: %d", len(clusters))
     for cluster_label, face_ids in clusters.items():
-        logger.info(f"  Cluster {cluster_label}: {len(face_ids)} faces")
+        logger.info("  Cluster %d: %d faces", cluster_label, len(face_ids))
     logger.info("=" * 70)
     
     return len(clusters)
 
 
-def get_cluster_info(db, cluster_id: int) -> Dict:
-    """
-    Get detailed information about a cluster.
-    
-    Args:
-        db: DatabaseManager instance
-        cluster_id: ID of the cluster
-        
-    Returns:
-        Dictionary with cluster information
-    """
-    cursor = db.conn.cursor()
-    
-    # Get cluster details
-    cursor.execute(
-        """SELECT id, cluster_name, face_count, created_at, updated_at
-           FROM face_clusters
-           WHERE id = ?""",
-        (cluster_id,)
-    )
-    cluster_row = cursor.fetchone()
-    
-    if not cluster_row:
-        return None
-    
-    # Get member faces
-    cursor.execute(
-        """SELECT face_id, similarity_score
-           FROM face_cluster_members
-           WHERE cluster_id = ?
-           ORDER BY similarity_score DESC""",
-        (cluster_id,)
-    )
-    members = cursor.fetchall()
-    
-    return {
-        'cluster_id': cluster_row[0],
-        'cluster_name': cluster_row[1],
-        'face_count': cluster_row[2],
-        'created_at': cluster_row[3],
-        'updated_at': cluster_row[4],
-        'members': [{'face_id': m[0], 'similarity': m[1]} for m in members]
-    }
-
-
-def get_all_clusters(db) -> List[Dict]:
-    """
-    Get all clusters from the database.
-    
-    Args:
-        db: DatabaseManager instance
-        
-    Returns:
-        List of cluster dictionaries
-    """
-    cursor = db.conn.cursor()
-    cursor.execute(
-        """SELECT id, cluster_name, face_count, created_at
-           FROM face_clusters
-           ORDER BY face_count DESC"""
-    )
-    
-    clusters = []
-    for row in cursor.fetchall():
-        clusters.append({
-            'cluster_id': row[0],
-            'cluster_name': row[1],
-            'face_count': row[2],
-            'created_at': row[3]
-        })
-    
-    return clusters
-
-
-if __name__ == '__main__':
-    """
-    Run clustering as standalone script
-    Usage: python face_clustering.py
-    """
+def main():
+    """Main function for running clustering as standalone script."""
     from database_manager import DatabaseManager
     
     # Initialize database
-    db = DatabaseManager(db_path=config.SQLITE_DB_PATH, db_type=config.DB_TYPE)
+    database = DatabaseManager(db_path=config.SQLITE_DB_PATH, db_type=config.DB_TYPE)
     
     # Run auto clustering
-    threshold = 0.6  # Adjust based on your needs (lower = stricter)
-    min_samples = 2  # Minimum 2 faces to form a cluster
+    cluster_threshold = 0.6  # Adjust based on your needs (lower = stricter)
+    cluster_min_samples = 2  # Minimum 2 faces to form a cluster
     
-    n_clusters = auto_cluster(db, threshold=threshold, min_samples=min_samples)
+    num_clusters = auto_cluster(database, threshold=cluster_threshold, min_samples=cluster_min_samples)
     
-    print(f"\n✓ Clustering complete! Created {n_clusters} clusters.")
-    print(f"\nTo view clusters, check the database or use view_database.py")
+    print(f"\n✓ Clustering complete! Created {num_clusters} clusters.")
+    print("\nTo view clusters, check the database or use view_database.py")
     
-    db.close()
+    database.close()
+
+
+if __name__ == '__main__':
+    main()

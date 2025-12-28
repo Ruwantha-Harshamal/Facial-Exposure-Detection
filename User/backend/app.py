@@ -52,7 +52,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # Initialize components (shared with admin backend)
 logger.info("Initializing components...")
 db = DatabaseManager(db_path=config.SQLITE_DB_PATH, db_type=config.DB_TYPE)
-logger.info(f"Database path: {config.SQLITE_DB_PATH}")
+logger.info("Database path: %s", config.SQLITE_DB_PATH)
 faiss_mgr = FAISSManager()
 face_proc = FaceProcessor()
 logger.info("✓ All components ready")
@@ -61,7 +61,7 @@ logger.info("✓ All components ready")
 @app.before_request
 def log_request_info():
     """Log every request for debugging"""
-    logger.info(f'REQUEST: {request.method} {request.path}')
+    logger.info('REQUEST: %s %s', request.method, request.path)
 
 
 def allowed_file(filename):
@@ -106,8 +106,8 @@ def get_stats():
                 'total_images': stats.get('active_images', 0)
             }
         })
-    except Exception as e:
-        logger.error(f"Error getting stats: {e}")
+    except (KeyError, AttributeError, TypeError) as e:
+        logger.error("Error getting stats: %s", e)
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -147,7 +147,7 @@ def upload():
     
     try:
         file.save(temp_path)
-        logger.info(f"Saved temp file: {temp_path}")
+        logger.info("Saved temp file: %s", temp_path)
         
         # Load photo into RAM
         with open(temp_path, 'rb') as f:
@@ -157,7 +157,7 @@ def upload():
         logger.info("Detecting face...")
         face_results = face_proc.process_image_bytes(photo_bytes, "user_upload")
         
-        logger.info(f"Face detection returned {len(face_results) if face_results else 0} results")
+        logger.info("Face detection returned %d results", len(face_results) if face_results else 0)
         
         if not face_results or len(face_results) == 0:
             os.remove(temp_path)  # Delete temp file
@@ -169,7 +169,8 @@ def upload():
         # Get the best face (highest confidence)
         try:
             # Log the structure of face_results for debugging
-            logger.info(f"First face result structure: {type(face_results[0])} with {len(face_results[0]) if hasattr(face_results[0], '__len__') else 'unknown'} elements")
+            first_len = len(face_results[0]) if hasattr(face_results[0], '__len__') else 'unknown'
+            logger.info("First face result structure: %s with %s elements", type(face_results[0]), first_len)
             
             faces = sorted(face_results, key=lambda x: x[1], reverse=True)
             
@@ -182,34 +183,34 @@ def upload():
                 }), 400
             
             face_data = faces[0]
-            logger.info(f"Face data has {len(face_data)} elements")
+            logger.info("Face data has %d elements", len(face_data))
             
             if len(face_data) != 4:
-                logger.error(f"Unexpected face data format: expected 4 elements, got {len(face_data)}")
+                logger.error("Unexpected face data format: expected 4 elements, got %d", len(face_data))
                 os.remove(temp_path)
                 return jsonify({
                     'success': False,
                     'error': 'Internal error: Invalid face data format'
                 }), 500
             
-            bbox, confidence, thumbnail_bytes, user_embedding = face_data
+            _bbox, confidence, _thumbnail_bytes, user_embedding = face_data
             
         except (IndexError, ValueError, TypeError) as e:
-            logger.error(f"Error processing face data: {e}", exc_info=True)
+            logger.error("Error processing face data: %s", e, exc_info=True)
             os.remove(temp_path)
             return jsonify({
                 'success': False,
                 'error': f'Internal error processing face data: {str(e)}'
             }), 500
         
-        logger.info(f"Face detected with {confidence:.2%} confidence")
+        logger.info("Face detected with %.2f%% confidence", confidence * 100)
         
         # Search FAISS for similar faces
         logger.info("Searching database...")
         
         # Check if we have vectors in FAISS
         total_vectors = faiss_mgr.get_total_vectors()
-        logger.info(f"FAISS has {total_vectors} vectors")
+        logger.info("FAISS has %d vectors", total_vectors)
         
         if total_vectors == 0:
             logger.warning("No vectors in FAISS index")
@@ -223,7 +224,7 @@ def upload():
             })
         
         k = min(50, total_vectors)  # Search top 50 or less if database is small
-        logger.info(f"Searching for top {k} similar faces...")
+        logger.info("Searching for top %d similar faces...", k)
         
         # Note: faiss_mgr.search() returns (similarities_list, face_ids_list)
         # NOT nested arrays - they're already filtered and flattened
@@ -241,13 +242,13 @@ def upload():
                 'total_searched': total_vectors
             })
         
-        logger.info(f"Search returned {len(similarities)} matches above threshold")
+        logger.info("Search returned %d matches above threshold", len(similarities))
         
         # Build matches list
         matches = []
         
         for similarity, face_id in zip(similarities, face_ids):
-            logger.info(f"Checking face_id {face_id} with similarity {similarity:.2%}")
+            logger.info("Checking face_id %d with similarity %.2f%%", face_id, similarity * 100)
             
             # Query database for face details
             cursor = db.conn.cursor()
@@ -280,10 +281,10 @@ def upload():
         
         # Delete user's photo (PRIVACY!)
         os.remove(temp_path)
-        logger.info(f"✓ Deleted temp file: {temp_path}")
+        logger.info("✓ Deleted temp file: %s", temp_path)
         
         # Log results
-        logger.info(f"Found {len(matches)} database matches")
+        logger.info("Found %d database matches", len(matches))
         logger.info("=" * 70)
         
         # Return results
@@ -304,12 +305,12 @@ def upload():
                 'total_searched': faiss_mgr.get_total_vectors()
             })
     
-    except Exception as e:
+    except (IOError, OSError, RuntimeError) as e:
         # Clean up temp file on error
         if os.path.exists(temp_path):
             os.remove(temp_path)
         
-        logger.error(f"Error processing upload: {e}", exc_info=True)
+        logger.error("Error processing upload: %s", e, exc_info=True)
         return jsonify({
             'success': False,
             'error': f'Processing error: {str(e)}'
@@ -337,8 +338,8 @@ def get_thumbnail(face_id):
         else:
             return jsonify({'error': 'Thumbnail not found'}), 404
     
-    except Exception as e:
-        logger.error(f"Error serving thumbnail: {e}")
+    except (IOError, OSError) as e:
+        logger.error("Error serving thumbnail: %s", e)
         return jsonify({'error': str(e)}), 500
 
 
@@ -358,7 +359,7 @@ if __name__ == '__main__':
     print("=" * 70)
     print(f"Database: {config.DB_TYPE}")
     print(f"Faces indexed: {faiss_mgr.get_total_vectors()}")
-    print(f"Server starting at: http://localhost:5000")
+    print("Server starting at: http://localhost:5000")
     print("=" * 70 + "\n")
     
     # Run Flask server

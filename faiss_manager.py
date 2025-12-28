@@ -8,8 +8,12 @@ import logging
 import os
 from typing import List, Tuple
 
-import faiss
 import numpy as np
+
+try:
+    import faiss  # type: ignore
+except ImportError:
+    faiss = None
 
 import config
 
@@ -26,6 +30,9 @@ class FAISSManager:
         Args:
             index_path: Path to save/load index (defaults to config)
         """
+        if faiss is None:
+            raise ImportError("faiss-cpu not installed. Install with: pip install faiss-cpu")
+        
         self.index_path = index_path or config.FAISS_INDEX_PATH
         self.index = None
         self.dimension = config.EMBEDDING_DIMENSIONS
@@ -45,7 +52,7 @@ class FAISSManager:
         """
         index_type = index_type or config.FAISS_INDEX_TYPE
         
-        logger.info(f"Creating {index_type.upper()} index (dimension={self.dimension})...")
+        logger.info("Creating %s index (dimension=%d)...", index_type.upper(), self.dimension)
         
         if index_type == 'flat':
             # Exact search - slower but 100% accurate
@@ -65,7 +72,7 @@ class FAISSManager:
         
         # Wrap in IndexIDMap to store face_ids
         self.index = faiss.IndexIDMap(base_index)
-        logger.info(f"FAISS index created ({index_type.upper()} with {config.FAISS_METRIC} metric)")
+        logger.info("FAISS index created (%s with %s metric)", index_type.upper(), config.FAISS_METRIC)
     
     def add_embedding(self, face_id: int, embedding: np.ndarray):
         """
@@ -83,7 +90,7 @@ class FAISSManager:
         face_id_array = np.array([face_id], dtype=np.int64)
         
         self.index.add_with_ids(embedding, face_id_array)
-        logger.debug(f"Added face_id {face_id} to FAISS index")
+        logger.debug("Added face_id %d to FAISS index", face_id)
     
     def add_embeddings_batch(self, face_ids: List[int], embeddings: np.ndarray):
         """
@@ -104,7 +111,7 @@ class FAISSManager:
         face_id_array = np.array(face_ids, dtype=np.int64)
         
         self.index.add_with_ids(embeddings, face_id_array)
-        logger.info(f"Added {len(face_ids)} embeddings to FAISS index")
+        logger.info("Added %d embeddings to FAISS index", len(face_ids))
     
     def search(
         self,
@@ -155,7 +162,7 @@ class FAISSManager:
         filtered_similarities = similarities[valid_mask].tolist()
         filtered_face_ids = indices[valid_mask].tolist()
         
-        logger.info(f"Found {len(filtered_face_ids)} matches above {threshold:.0%} similarity")
+        logger.info("Found %d matches above %.0f%% similarity", len(filtered_face_ids), threshold * 100)
         
         return filtered_similarities, filtered_face_ids
     
@@ -168,18 +175,18 @@ class FAISSManager:
             return
         
         faiss.write_index(self.index, path)
-        logger.info(f"Saved FAISS index to {path} ({self.index.ntotal} vectors)")
+        logger.info("Saved FAISS index to %s (%d vectors)", path, self.index.ntotal)
     
     def load_index(self, path: str = None):
         """Load index from disk"""
         path = path or self.index_path
         
         if not os.path.exists(path):
-            logger.warning(f"Index file not found: {path}")
+            logger.warning("Index file not found: %s", path)
             return
         
         self.index = faiss.read_index(path)
-        logger.info(f"Loaded FAISS index from {path} ({self.index.ntotal} vectors)")
+        logger.info("Loaded FAISS index from %s (%d vectors)", path, self.index.ntotal)
     
     def get_total_vectors(self) -> int:
         """Get number of vectors in index"""
