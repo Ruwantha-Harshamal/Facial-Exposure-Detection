@@ -17,12 +17,24 @@ DB_TYPE = os.getenv('DB_TYPE', 'sqlite')
 SQLITE_DB_PATH = os.getenv('SQLITE_DB_PATH', 'face_recognition.db')
 
 # PostgreSQL configuration
+# SECURITY: No default credentials - must be set via environment variables
+_postgres_user = os.getenv('POSTGRES_USER')
+_postgres_password = os.getenv('POSTGRES_PASSWORD')
+
+if DB_TYPE == 'postgresql':
+    if not _postgres_user or not _postgres_password:
+        raise ValueError(
+            "SECURITY ERROR: PostgreSQL credentials must be set via environment variables!\n"
+            "Set POSTGRES_USER and POSTGRES_PASSWORD before running.\n"
+            "Never use default credentials in production."
+        )
+
 POSTGRES_CONFIG = {
     'host': os.getenv('POSTGRES_HOST', 'localhost'),
     'port': int(os.getenv('POSTGRES_PORT', '5432')),
     'database': os.getenv('POSTGRES_DB', 'face_recognition'),
-    'user': os.getenv('POSTGRES_USER', 'postgres'),
-    'password': os.getenv('POSTGRES_PASSWORD', 'postgres'),
+    'user': _postgres_user,
+    'password': _postgres_password,
 }
 
 # ═══════════════════════════════════════════════════════════

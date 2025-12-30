@@ -8,10 +8,18 @@ Handles user photo uploads and face search
 import os
 import sys
 import logging
+import secrets
+import atexit
 from flask import Flask, request, jsonify, send_from_directory, send_file
 from werkzeug.utils import secure_filename
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_cors import CORS
+from flask_talisman import Talisman
 import uuid
 from io import BytesIO
+from PIL import Image
+from functools import wraps
 
 # Add parent directory to path to import admin backend modules
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
@@ -41,13 +49,123 @@ app = Flask(__name__,
             static_folder='../frontend',
             template_folder='../frontend')
 
+# SECURITY: Set secret key for session management
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
+
+# SECURITY: Disable debug mode in production
+app.config['DEBUG'] = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+
+# SECURITY: Set max content length (10MB)
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
+
+# SECURITY: HTTPS enforcement (Talisman)
+# Disabled in development, enable in production by setting FLASK_ENV=production
+if os.getenv('FLASK_ENV', 'development') == 'production':
+    Talisman(app, 
+             force_https=True,
+             strict_transport_security=True,
+             strict_transport_security_max_age=31536000,  # 1 year
+             content_security_policy={
+                 'default-src': "'self'",
+                 'img-src': ['*', 'data:'],
+                 'style-src': ["'self'", "'unsafe-inline'"],
+                 'script-src': ["'self'", "'unsafe-inline'"]
+             })
+
+# SECURITY: CORS configuration
+CORS(app, 
+     resources={r"/api/*": {
+         "origins": os.getenv('ALLOWED_ORIGINS', 'http://localhost:5000').split(','),
+         "methods": ["GET", "POST", "OPTIONS"],
+         "allow_headers": ["Content-Type", "Authorization"],
+         "max_age": 3600
+     }})
+
+# SECURITY: Rate limiting
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri=os.getenv('RATE_LIMIT_STORAGE_URI', 'memory://')
+)
+
+# SECURITY: API Key authentication for admin endpoints
+ADMIN_API_KEY = os.getenv('ADMIN_API_KEY')
+
+def require_api_key(f):
+    """Decorator to require API key for admin endpoints"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not ADMIN_API_KEY:
+            # If no API key is set, allow access (development mode)
+            logger.warning("ADMIN_API_KEY not set - admin endpoints are unprotected!")
+            return f(*args, **kwargs)
+        
+        # Check API key in Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            return jsonify({'error': 'Missing Authorization header'}), 401
+        
+        # Support both "Bearer <token>" and "<token>" formats
+        token = auth_header.replace('Bearer ', '').strip()
+        
+        if token != ADMIN_API_KEY:
+            logger.warning("Invalid API key attempt from %s", get_remote_address())
+            return jsonify({'error': 'Invalid API key'}), 403
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
 # Configuration
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BACKEND_DIR, 'uploads')
 ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png'}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_IMAGE_PIXELS = 50_000_000  # 50 megapixels (prevent image bombs)
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# SECURITY: Track temporary files for cleanup
+temp_files = set()
+
+def cleanup_temp_files():
+    """Cleanup temporary files on exit"""
+    for filepath in temp_files:
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                logger.debug("Cleaned up temp file: %s", filepath)
+        except (OSError, IOError) as e:
+            logger.error("Failed to cleanup temp file: %s", e)
+
+atexit.register(cleanup_temp_files)
+
+# SECURITY: Validate image file content
+def validate_image(file_path):
+    """
+    Validate that uploaded file is a legitimate image
+    Prevents image bombs and malicious files
+    """
+    try:
+        with Image.open(file_path) as img:
+            img.verify()  # Verify it's actually an image
+        
+        # Reopen after verify (verify closes the file)
+        with Image.open(file_path) as img:
+            # Check dimensions (prevent image bombs)
+            if img.width * img.height > MAX_IMAGE_PIXELS:
+                logger.warning("Image too large: %dx%d pixels", img.width, img.height)
+                return False
+            
+            # Check format is allowed
+            if img.format.lower() not in ['jpeg', 'jpg', 'png']:
+                logger.warning("Invalid image format: %s", img.format)
+                return False
+        
+        return True
+    except (OSError, IOError, ValueError) as e:
+        logger.error("Image validation failed: %s", e)
+        return False
 
 # Initialize components (shared with admin backend)
 logger.info("Initializing components...")
@@ -94,8 +212,9 @@ def serve_js(filename):
 
 
 @app.route('/api/stats')
+@require_api_key
 def get_stats():
-    """Get database statistics"""
+    """Get database statistics (requires API key)"""
     try:
         stats = db.get_statistics()
         return jsonify({
@@ -112,6 +231,7 @@ def get_stats():
 
 
 @app.route('/api/upload', methods=['POST'])
+@limiter.limit("10 per hour")  # SECURITY: Rate limit uploads
 def upload():
     """
     Handle user photo upload and face search
@@ -124,6 +244,13 @@ def upload():
     5. Query database for match details
     6. Delete user's photo (privacy!)
     7. Return results
+    
+    SECURITY MEASURES:
+    - File size validation
+    - Content type validation
+    - Image format verification
+    - Temp file cleanup on error
+    - Rate limiting (10 uploads per hour per IP)
     """
     logger.info("=" * 70)
     logger.info("NEW UPLOAD REQUEST")
@@ -141,13 +268,36 @@ def upload():
     if not allowed_file(file.filename):
         return jsonify({'success': False, 'error': 'Invalid file type. Only JPG, JPEG, PNG allowed'}), 400
     
-    # Save to temporary file
+    # SECURITY: Validate file size before saving (request.content_length is unreliable for multipart)
+    file.seek(0, 2)  # Seek to end
+    file_size = file.tell()
+    file.seek(0)  # Seek back to start
+    
+    if file_size > MAX_FILE_SIZE:
+        return jsonify({
+            'success': False, 
+            'error': f'File too large. Maximum size is {MAX_FILE_SIZE // (1024*1024)}MB'
+        }), 413
+    
+    # SECURITY: Generate secure random filename (prevent path traversal)
     filename = secure_filename(f"{uuid.uuid4()}.jpg")
     temp_path = os.path.join(UPLOAD_FOLDER, filename)
     
+    # SECURITY: Track temp file for cleanup
+    temp_files.add(temp_path)
+    
     try:
         file.save(temp_path)
-        logger.info("Saved temp file: %s", temp_path)
+        logger.info("File uploaded successfully")
+        
+        # SECURITY: Validate file content before processing
+        if not validate_image(temp_path):
+            temp_files.discard(temp_path)
+            os.remove(temp_path)
+            return jsonify({
+                'success': False,
+                'error': 'Invalid image file. Please upload a valid JPG or PNG image.'
+            }), 400
         
         # Load photo into RAM
         with open(temp_path, 'rb') as f:
@@ -359,6 +509,11 @@ if __name__ == '__main__':
     print("=" * 70)
     print(f"Database: {config.DB_TYPE}")
     print(f"Faces indexed: {faiss_mgr.get_total_vectors()}")
+    print(f"Environment: {os.getenv('FLASK_ENV', 'development')}")
+    print(f"Debug mode: {app.config['DEBUG']}")
+    print(f"HTTPS enforcement: {'ON' if os.getenv('FLASK_ENV') == 'production' else 'OFF (dev mode)'}")
+    print("Rate limiting: ON (10 uploads/hour per IP)")
+    print(f"Admin API key: {'SET' if ADMIN_API_KEY else 'NOT SET (admin endpoints unprotected!)'}")
     print("Server starting at: http://localhost:5000")
     print("=" * 70 + "\n")
     
@@ -366,5 +521,5 @@ if __name__ == '__main__':
     app.run(
         host='0.0.0.0',  # Accessible from network
         port=5000,
-        debug=True  # Set to False in production
+        debug=app.config['DEBUG']  # Use config value
     )

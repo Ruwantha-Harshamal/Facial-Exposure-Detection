@@ -7,6 +7,7 @@ Returns image data in RAM (no disk storage)
 
 import logging
 import time
+import ipaddress
 from typing import List, Tuple
 from urllib.parse import urlparse
 
@@ -18,6 +19,73 @@ from selenium.webdriver.common.by import By
 import config
 
 logger = logging.getLogger(__name__)
+
+# SECURITY: Blocked URL patterns to prevent SSRF attacks
+BLOCKED_SCHEMES = ['file', 'ftp', 'gopher', 'data']
+BLOCKED_HOSTS = ['localhost', '0.0.0.0']
+BLOCKED_IP_RANGES = [
+    ipaddress.ip_network('10.0.0.0/8'),      # Private network
+    ipaddress.ip_network('172.16.0.0/12'),   # Private network
+    ipaddress.ip_network('192.168.0.0/16'),  # Private network
+    ipaddress.ip_network('127.0.0.0/8'),     # Loopback
+    ipaddress.ip_network('169.254.0.0/16'),  # Link-local
+]
+
+def validate_url(url: str) -> bool:
+    """
+    Validate URL to prevent SSRF attacks
+    
+    Args:
+        url: URL to validate
+    
+    Returns:
+        True if URL is safe, False otherwise
+    """
+    try:
+        parsed = urlparse(url)
+        
+        # Check scheme
+        if parsed.scheme.lower() in BLOCKED_SCHEMES:
+            logger.warning("Blocked URL scheme: %s", parsed.scheme)
+            return False
+        
+        # Only allow http and https
+        if parsed.scheme.lower() not in ['http', 'https']:
+            logger.warning("Invalid URL scheme: %s", parsed.scheme)
+            return False
+        
+        # Check hostname
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        
+        hostname_lower = hostname.lower()
+        
+        # Block localhost and variations
+        if hostname_lower in BLOCKED_HOSTS or hostname_lower.startswith('localhost'):
+            logger.warning("Blocked hostname: %s", hostname)
+            return False
+        
+        # Try to resolve and check IP
+        try:
+            import socket
+            ip_str = socket.gethostbyname(hostname)
+            ip = ipaddress.ip_address(ip_str)
+            
+            # Check if IP is in blocked ranges
+            for blocked_range in BLOCKED_IP_RANGES:
+                if ip in blocked_range:
+                    logger.warning("Blocked IP range: %s resolves to %s", hostname, ip)
+                    return False
+        except (socket.gaierror, ValueError) as e:
+            logger.warning("Could not resolve hostname %s: %s", hostname, e)
+            return False
+        
+        return True
+    
+    except Exception as e:
+        logger.error("URL validation error: %s", e)
+        return False
 
 
 class WebScraper:
@@ -42,6 +110,11 @@ class WebScraper:
         Returns:
             List of image URLs
         """
+        # SECURITY: Validate URL to prevent SSRF
+        if not validate_url(url):
+            logger.error("SECURITY: Rejected unsafe URL: %s", url)
+            raise ValueError(f"Invalid or unsafe URL: {url}")
+        
         logger.info(f"Scraping: {url}")
         
         chrome_options = Options()
@@ -127,6 +200,11 @@ class WebScraper:
         Returns:
             (image_bytes, width, height) or (None, None, None) on failure
         """
+        # SECURITY: Validate image URL to prevent SSRF
+        if not validate_url(image_url):
+            logger.warning("SECURITY: Rejected unsafe image URL: %s", image_url)
+            return None, None, None
+        
         headers = {
             "User-Agent": config.USER_AGENT,
             "Referer": page_url

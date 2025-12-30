@@ -15,6 +15,12 @@ build/
 venv/
 ENV/
 
+# SECURITY: Environment variables (NEVER COMMIT!)
+.env
+.env.local
+.env.production
+.env.*.local
+
 # Database files (keep structure, ignore data)
 *.db
 *.db-journal
@@ -25,11 +31,17 @@ face_recognition.db
 # FAISS index files (can be regenerated)
 faiss_index.bin
 
-# User uploads (temporary files)
+# User uploads (temporary files - PRIVACY!)
 User/backend/uploads/*
 !User/backend/uploads/.gitkeep
+uploads/
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
 
-# Logs
+# Logs (may contain sensitive information)
 *.log
 batch_processing.log
 
@@ -44,16 +56,30 @@ batch_processing.log
 *.old
 *.tmp
 *.temp
-batch_processing.log
 
 # VS Code
 .vscode/
-*.code-workspace
+
+# IDE files
+.idea/
+*.swp
+*.swo
+*~
 
 # OS files
 .DS_Store
 Thumbs.db
-desktop.ini
+
+# Chrome driver
+chromedriver
+chromedriver.exe
+
+# Security reports (don't expose publicly)
+SECURITY_AUDIT_REPORT.md
+APPLICATION_STATUS.md
+
+# Batch processing files
+websites.txt
 
 # Specific files to ignore
 analyze_*.py

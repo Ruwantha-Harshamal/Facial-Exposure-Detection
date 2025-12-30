@@ -3,6 +3,9 @@
 
 Flask==3.0.0
 Werkzeug==3.0.1
+Flask-Limiter==3.5.0
+Flask-Cors==4.0.0
+Flask-Talisman==1.1.0
 
 # Note: All other packages (TensorFlow, MTCNN, FAISS, etc.) 
 # are already installed from your main requirements.txt

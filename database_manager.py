@@ -7,7 +7,6 @@ Handles all SQLite database operations
 
 import os
 import sqlite3
-import pickle
 import io
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
@@ -257,8 +256,9 @@ class DatabaseManager:
         """
         import hashlib
         
-        # Serialize numpy array to bytes
-        embedding_bytes = pickle.dumps(embedding_vector)
+        # SECURITY FIX: Use safe numpy serialization instead of pickle
+        # Convert numpy array to bytes (more secure than pickle)
+        embedding_bytes = embedding_vector.astype(np.float32).tobytes()
         
         # Calculate hash for deduplication
         embedding_hash = hashlib.sha256(embedding_bytes).hexdigest()
@@ -292,7 +292,9 @@ class DatabaseManager:
         
         if row and row[0]:
             embedding_bytes = row[0]
-            return pickle.loads(embedding_bytes)
+            # SECURITY FIX: Deserialize numpy array safely (no pickle vulnerability)
+            embedding = np.frombuffer(embedding_bytes, dtype=np.float32)
+            return embedding
         return None
     
     def insert_face_complete(self, image_id: int, bbox: Tuple[int, int, int, int], 
@@ -336,17 +338,20 @@ class DatabaseManager:
         """
         cursor = self.conn.cursor()
         query = "SELECT face_id, embedding_vector FROM embeddings WHERE is_active = TRUE"
-        if limit:
-            query += f" LIMIT {limit}"
         
-        cursor.execute(query)
+        # SECURITY FIX: Use parameterized query for LIMIT clause
+        if limit:
+            cursor.execute(query + " LIMIT ?", (limit,))
+        else:
+            cursor.execute(query)
         
         results = []
         for row in cursor.fetchall():
             face_id = row[0]
             embedding_bytes = row[1]
             if embedding_bytes:
-                embedding = pickle.loads(embedding_bytes)
+                # SECURITY FIX: Deserialize numpy array safely (no pickle vulnerability)
+                embedding = np.frombuffer(embedding_bytes, dtype=np.float32)
                 results.append((face_id, embedding))
         
         return results
