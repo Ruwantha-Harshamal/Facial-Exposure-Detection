@@ -120,7 +120,9 @@ DEFAULT_SEARCH_RESULTS = 50
 
 # Minimum similarity threshold for matches (0.0 - 1.0)
 # Higher = more strict matching
-MIN_SIMILARITY_THRESHOLD = float(os.getenv('MIN_SIMILARITY_THRESHOLD', '0.70'))
+# Default 0.60 = L2 distance of ~0.8 (good balance for same person)
+# Lower values (0.40-0.50) include more matches but increase false positives
+MIN_SIMILARITY_THRESHOLD = float(os.getenv('MIN_SIMILARITY_THRESHOLD', '0.60'))
 
 # ═══════════════════════════════════════════════════════════
 #  CLUSTERING CONFIGURATION

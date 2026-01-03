@@ -231,7 +231,7 @@ def get_stats():
 
 
 @app.route('/api/upload', methods=['POST'])
-@limiter.limit("10 per hour")  # SECURITY: Rate limit uploads
+@limiter.limit("100 per hour")  # SECURITY: Rate limit uploads (increased for testing)
 def upload():
     """
     Handle user photo upload and face search
@@ -378,7 +378,8 @@ def upload():
         
         # Note: faiss_mgr.search() returns (similarities_list, face_ids_list)
         # NOT nested arrays - they're already filtered and flattened
-        similarities, face_ids = faiss_mgr.search(user_embedding, k=k, threshold=0.60)
+        # Use config threshold (default 0.40 for better recall)
+        similarities, face_ids = faiss_mgr.search(user_embedding, k=k, threshold=config.MIN_SIMILARITY_THRESHOLD)
         
         # Check if search returned results
         if not similarities or not face_ids or len(similarities) == 0 or len(face_ids) == 0:

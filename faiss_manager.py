@@ -150,9 +150,11 @@ class FAISSManager:
         # Convert distances to similarity scores
         if config.FAISS_METRIC == 'L2':
             # L2 distance: smaller = more similar
-            # Convert to similarity: 0 = identical, 1 = very different
-            similarities = distances / (1 + distances)  # Normalize
-            similarities = 1 - similarities  # Invert so higher = more similar
+            # FaceNet embeddings typically have L2 distances in range [0, 4]
+            # Same person: 0.0-1.0, Different person: 1.0+
+            # Convert to similarity percentage using exponential decay
+            # This is more appropriate for face recognition than linear normalization
+            similarities = np.exp(-distances / 2.0)  # exp(-d/2): d=0→1.0, d=1→0.60, d=2→0.37
         else:  # IP (cosine similarity)
             # IP: higher = more similar (already in [0, 1] range if normalized)
             similarities = distances
