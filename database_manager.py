@@ -96,6 +96,22 @@ class DatabaseManager:
         )
         self.conn.commit()
     
+    def get_all_websites(self) -> List[Dict]:
+        """
+        Get all websites from database.
+        
+        Returns:
+            List of tuples: (id, url, name, scraped_at)
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id, url, name, scraped_at
+            FROM websites
+            WHERE deleted_at IS NULL
+            ORDER BY created_at DESC
+        """)
+        return cursor.fetchall()
+
     # ========================================
     # IMAGE OPERATIONS
     # ========================================
@@ -459,6 +475,121 @@ class DatabaseManager:
         cursor.execute("SELECT * FROM v_statistics")
         row = cursor.fetchone()
         return dict(row) if row else {}
+    
+    # ========================================
+    # RE-SCRAPING OPERATIONS
+    # ========================================
+    
+    def get_stale_websites(self, days: int = 30) -> List[Dict]:
+        """
+        Get websites that need re-scraping (older than specified days).
+        
+        Args:
+            days: Number of days to consider a website stale
+        
+        Returns:
+            List of dictionaries with website info
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT 
+                w.id,
+                w.url,
+                w.name,
+                w.scraped_at,
+                CAST(julianday('now') - julianday(w.scraped_at) AS INTEGER) as days_old,
+                COUNT(DISTINCT i.id) as image_count,
+                COUNT(DISTINCT f.id) as face_count
+            FROM websites w
+            LEFT JOIN images i ON w.id = i.website_id AND i.deleted_at IS NULL
+            LEFT JOIN faces f ON i.id = f.image_id AND f.deleted_at IS NULL
+            WHERE w.deleted_at IS NULL
+              AND julianday('now') - julianday(w.scraped_at) > ?
+            GROUP BY w.id
+            ORDER BY days_old DESC
+        """, (days,))
+        
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                'id': row[0],
+                'url': row[1],
+                'name': row[2],
+                'scraped_at': row[3],
+                'days_old': row[4],
+                'image_count': row[5],
+                'face_count': row[6]
+            })
+        
+        return results
+    
+    def filter_new_images(self, image_urls: List[str]) -> List[str]:
+        """
+        Filter out image URLs that already exist in database.
+        
+        Args:
+            image_urls: List of image URLs to check
+        
+        Returns:
+            List of URLs that don't exist in database
+        """
+        if not image_urls:
+            return []
+        
+        cursor = self.conn.cursor()
+        
+        # Build query with placeholders
+        placeholders = ','.join(['?'] * len(image_urls))
+        cursor.execute(f"""
+            SELECT image_url 
+            FROM images 
+            WHERE image_url IN ({placeholders})
+              AND deleted_at IS NULL
+        """, image_urls)
+        
+        # Get existing URLs
+        existing_urls = {row[0] for row in cursor.fetchall()}
+        
+        # Return only new URLs
+        new_urls = [url for url in image_urls if url not in existing_urls]
+        
+        logger.info(f"Filtered images: {len(image_urls)} total, {len(new_urls)} new, {len(existing_urls)} existing")
+        
+        return new_urls
+    
+    def update_website_timestamp(self, website_id: int):
+        """
+        Update website's scraped_at timestamp to current time.
+        
+        Args:
+            website_id: Website ID to update
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            UPDATE websites 
+            SET scraped_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (website_id,))
+        self.conn.commit()
+        logger.info(f"Updated timestamp for website ID {website_id}")
+    
+    def get_website_image_count(self, website_id: int) -> int:
+        """
+        Get count of images for a website.
+        
+        Args:
+            website_id: Website ID
+        
+        Returns:
+            Number of images
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) 
+            FROM images 
+            WHERE website_id = ? AND deleted_at IS NULL
+        """, (website_id,))
+        return cursor.fetchone()[0]
     
     # ========================================
     # UTILITY OPERATIONS

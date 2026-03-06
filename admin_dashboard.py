@@ -16,9 +16,11 @@ import secrets
 from flask import Flask, render_template_string, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from datetime import datetime
+from datetime import datetime, timedelta
 import subprocess
 import threading
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # Import project modules
 from database_manager import DatabaseManager
@@ -47,6 +49,18 @@ faiss_mgr = FAISSManager()
 # Track running scraping jobs and logs
 scraping_jobs = {}
 scraping_logs = []
+
+# Initialize APScheduler
+scheduler = BackgroundScheduler()
+scheduler.start()
+
+# Track auto-scraping status
+auto_rescrape_status = {
+    'enabled': config.AUTO_RESCRAPE_ENABLED,
+    'next_run': None,
+    'last_run': None,
+    'interval_days': config.AUTO_RESCRAPE_INTERVAL_DAYS
+}
 
 # HTML Template
 DASHBOARD_TEMPLATE = """
@@ -99,6 +113,7 @@ DASHBOARD_TEMPLATE = """
                     <td>{{ w.face_count }}</td>
                     <td>
                         <button class="btn" onclick="scrape('{{ w.url }}')">🔄 Scrape</button>
+                        <button class="btn" style="background: #28a745;" onclick="rescrape('{{ w.url }}', {{ w.id }})">♻️ Re-scrape</button>
                         <button class="btn" style="background: #dc3545;" onclick="deleteWebsite({{ w.id }}, '{{ w.url }}', {{ w.image_count }}, {{ w.face_count }})">🗑️ Delete</button>
                     </td>
                 </tr>
@@ -107,6 +122,55 @@ DASHBOARD_TEMPLATE = """
             {% else %}
             <p>No websites yet. Add one above!</p>
             {% endif %}
+        </div>
+        
+        <div class="section">
+            <h2>⏰ Stale Websites (Need Update)</h2>
+            <p>Websites last scraped more than {{ rescrape_days }} days ago:</p>
+            {% if stale_websites %}
+            <button class="btn" style="background: #28a745;" onclick="rescrapeStale()">♻️ Update All Stale Websites</button>
+            <table>
+                <tr><th>URL</th><th>Last Scraped</th><th>Days Old</th><th>Images</th><th>Faces</th><th>Action</th></tr>
+                {% for w in stale_websites %}
+                <tr>
+                    <td><a href="{{ w.url }}" target="_blank">{{ w.url[:60] }}...</a></td>
+                    <td>{{ w.scraped_at }}</td>
+                    <td><strong>{{ w.days_old }}</strong> days</td>
+                    <td>{{ w.image_count }}</td>
+                    <td>{{ w.face_count }}</td>
+                    <td>
+                        <button class="btn" style="background: #28a745;" onclick="rescrape('{{ w.url }}', {{ w.id }})">♻️ Update</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </table>
+            {% else %}
+            <p style="color: #28a745;">✓ All websites are up to date!</p>
+            {% endif %}
+        </div>
+        
+        <div class="section">
+            <h2>🤖 Automatic Re-scraping</h2>
+            <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 10px;">
+                <p><strong>Status:</strong> 
+                    {% if auto_status.enabled %}
+                        <span style="color: #28a745;">✓ ENABLED</span>
+                    {% else %}
+                        <span style="color: #ffc107;">⊗ DISABLED</span>
+                    {% endif %}
+                </p>
+                <p><strong>Schedule:</strong> Every {{ auto_status.interval_days }} days</p>
+                {% if auto_status.next_run %}
+                <p><strong>Next Run:</strong> {{ auto_status.next_run }}</p>
+                {% endif %}
+                {% if auto_status.last_run %}
+                <p><strong>Last Run:</strong> {{ auto_status.last_run }}</p>
+                {% endif %}
+            </div>
+            <p style="font-size: 0.9em; color: rgba(255,255,255,0.7);">
+                ℹ️ Automatic re-scraping runs in the background while the admin dashboard is running.
+                To enable/disable or change settings, edit <code>config.py</code> and restart the dashboard.
+            </p>
         </div>
         
         <div class="section">
@@ -169,6 +233,34 @@ DASHBOARD_TEMPLATE = """
             const data = await res.json();
             alert(data.success ? `✓ Started ${data.total_websites} websites!` : '✗ Error');
             startRefresh();
+        }
+        
+        async function rescrape(url, websiteId) {
+            if (!confirm('Re-scrape ' + url + '?\n\nThis will find and process only NEW images (smart merge).')) return;
+            const res = await fetch('/api/rescrape_website', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({url, website_id: websiteId})
+            });
+            const data = await res.json();
+            if (data.success) {
+                alert(`✓ Re-scrape complete!\n\nNew images: ${data.new_images}\nNew faces: ${data.new_faces}\nTotal images: ${data.total_images}`);
+                location.reload();
+            } else {
+                alert('✗ Error: ' + data.error);
+            }
+        }
+        
+        async function rescrapeStale() {
+            if (!confirm('Update all stale websites?\n\nThis will re-scrape all websites older than {{ rescrape_days }} days.')) return;
+            const res = await fetch('/api/rescrape_stale', {method: 'POST'});
+            const data = await res.json();
+            if (data.success) {
+                alert(`✓ Batch update complete!\n\nWebsites updated: ${data.updated_count}\nNew images: ${data.new_images}\nNew faces: ${data.new_faces}`);
+                location.reload();
+            } else {
+                alert('✗ Error: ' + data.error);
+            }
         }
         
         async function deleteWebsite(websiteId, url, imageCount, faceCount) {
@@ -255,7 +347,15 @@ def index():
         GROUP BY w.id ORDER BY w.created_at DESC
     """)
     websites = [{'id': r[0], 'url': r[1], 'name': r[2], 'image_count': r[3], 'face_count': r[4]} for r in cursor.fetchall()]
-    return render_template_string(DASHBOARD_TEMPLATE, websites=websites)
+    
+    # Get stale websites
+    stale_websites = db.get_stale_websites(days=config.RESCRAPE_AFTER_DAYS)
+    
+    return render_template_string(DASHBOARD_TEMPLATE, 
+                                 websites=websites, 
+                                 stale_websites=stale_websites,
+                                 rescrape_days=config.RESCRAPE_AFTER_DAYS,
+                                 auto_status=auto_rescrape_status)
 
 
 @app.route('/api/add_website', methods=['POST'])
@@ -389,18 +489,294 @@ def delete_website():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/scraping_status')
-@limiter.exempt  # No rate limit for status checks
-def scraping_status():
-    return jsonify({'success': True, 'jobs': scraping_jobs, 'logs': scraping_logs[-50:]})
+def perform_rescrape(website_id: int, url: str) -> dict:
+    """
+    Internal function to perform re-scraping of a website.
+    
+    Args:
+        website_id: Database ID of the website
+        url: Website URL
+        
+    Returns:
+        Dictionary with 'success', 'new_images', 'new_faces', 'total_images'
+    """
+    try:
+        # Import here to avoid circular imports
+        from main_pipeline import process_website
+        from scraper import WebScraper
+        from face_processor import FaceProcessor
+        
+        # Track before state
+        old_image_count = db.get_website_image_count(website_id)
+        old_stats = db.get_statistics()
+        old_face_count = old_stats.get('active_faces', 0)
+        
+        # Process website (smart merge will filter existing images)
+        scraper = WebScraper(headless=True)
+        face_proc = FaceProcessor()
+        process_website(url, db, faiss_mgr, face_proc, scraper)
+        
+        # Track after state
+        new_image_count = db.get_website_image_count(website_id)
+        new_stats = db.get_statistics()
+        new_face_count = new_stats.get('active_faces', 0)
+        
+        # Calculate deltas
+        new_images = new_image_count - old_image_count
+        new_faces = new_face_count - old_face_count
+        
+        return {
+            'success': True,
+            'new_images': new_images,
+            'new_faces': new_faces,
+            'total_images': new_image_count
+        }
+    except Exception as e:
+        logger.exception("Error in perform_rescrape")
+        return {
+            'success': False,
+            'error': str(e)
+        }
 
+
+@app.route('/api/rescrape_website', methods=['POST'])
+def rescrape_website():
+    """
+    Re-scrape a specific website with smart merge (only new images).
+    """
+    try:
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        website_id = data.get('website_id')
+        
+        if not url or not website_id:
+            return jsonify({'success': False, 'error': 'url and website_id required'}), 400
+        
+        scraping_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ♻️ Re-scraping: {url}")
+        
+        result = perform_rescrape(website_id, url)
+        
+        if result['success']:
+            scraping_logs.append(
+                f"[{datetime.now().strftime('%H:%M:%S')}] ✓ Re-scrape complete: "
+                f"+{result['new_images']} images, +{result['new_faces']} faces"
+            )
+        else:
+            scraping_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✗ Re-scrape failed: {result['error']}")
+        
+        return jsonify(result)
+    except Exception as e:
+        logger.exception("Error re-scraping website")
+        scraping_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✗ Re-scrape failed: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/rescrape_stale', methods=['POST'])
+def rescrape_stale():
+    """
+    Batch re-scrape all stale websites.
+    """
+    try:
+        # Get stale websites
+        stale_websites = db.get_stale_websites(days=config.RESCRAPE_AFTER_DAYS)
+        
+        if not stale_websites:
+            return jsonify({'success': True, 'updated_count': 0, 'new_images': 0, 'new_faces': 0})
+        
+        scraping_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ♻️ Batch update: {len(stale_websites)} websites")
+        
+        # Track totals
+        total_new_images = 0
+        total_new_faces = 0
+        updated_count = 0
+        
+        # Process each stale website
+        for website in stale_websites:
+            try:
+                scraping_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] Processing: {website['url']}")
+                
+                # Use perform_rescrape helper function
+                result = perform_rescrape(website['id'], website['url'])
+                
+                if result['success']:
+                    total_new_images += result.get('new_images', 0)
+                    total_new_faces += result.get('new_faces', 0)
+                    updated_count += 1
+                    
+                    scraping_logs.append(
+                        f"[{datetime.now().strftime('%H:%M:%S')}] ✓ {website['url']}: "
+                        f"+{result['new_images']} images, +{result['new_faces']} faces"
+                    )
+                else:
+                    logger.error("Failed to re-scrape %s: %s", website['url'], result.get('error'))
+                    scraping_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✗ Failed: {website['url']}")
+                    
+            except Exception as e:
+                logger.exception("Failed to re-scrape %s", website['url'])
+                scraping_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✗ Failed: {website['url']}")
+        
+        scraping_logs.append(
+            f"[{datetime.now().strftime('%H:%M:%S')}] ✓ Batch complete: "
+            f"{updated_count} websites, +{total_new_images} images, +{total_new_faces} faces"
+        )
+        
+        return jsonify({
+            'success': True,
+            'updated_count': updated_count,
+            'new_images': total_new_images,
+            'new_faces': total_new_faces
+        })
+    except Exception as e:
+        logger.exception("Error in batch re-scrape")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/status')
+def status():
+    """Get current scraping status and logs."""
+    return jsonify({
+        'jobs': scraping_jobs,
+        'logs': scraping_logs[-100:]  # Last 100 log entries
+    })
+
+
+def scheduled_rescrape():
+    """Automatic re-scraping job that runs on schedule."""
+    try:
+        logger.info("Starting scheduled automatic re-scrape...")
+        auto_rescrape_status['last_run'] = datetime.now().isoformat()
+        
+        # Get all websites from database
+        websites = db.get_all_websites()
+        if not websites:
+            logger.info("No websites found for scheduled re-scrape")
+            return
+        
+        total_new_images = 0
+        total_new_faces = 0
+        
+        # Import here to avoid circular imports
+        from main_pipeline import process_website
+        from scraper import WebScraper
+        from face_processor import FaceProcessor
+        
+        scraper = WebScraper(headless=True)
+        face_proc = FaceProcessor()
+        
+        for website in websites:
+            website_id = website[0]
+            url = website[1]
+            
+            try:
+                scraping_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] 🤖 Auto re-scrape: {url}")
+                
+                # Track before state
+                old_image_count = db.get_website_image_count(website_id)
+                old_stats = db.get_statistics()
+                old_face_count = old_stats.get('active_faces', 0)
+                
+                # Process website (smart merge will filter existing images)
+                process_website(url, db, faiss_mgr, face_proc, scraper)
+                
+                # Track after state
+                new_image_count = db.get_website_image_count(website_id)
+                new_stats = db.get_statistics()
+                new_face_count = new_stats.get('active_faces', 0)
+                
+                # Calculate deltas
+                new_images = new_image_count - old_image_count
+                new_faces = new_face_count - old_face_count
+                
+                total_new_images += new_images
+                total_new_faces += new_faces
+                
+                scraping_logs.append(
+                    f"[{datetime.now().strftime('%H:%M:%S')}] ✓ {url}: "
+                    f"+{new_images} images, +{new_faces} faces"
+                )
+                
+            except Exception as e:
+                logger.error("Error in scheduled re-scrape of %s: %s", url, str(e))
+                scraping_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✗ Failed: {url}")
+        
+        logger.info("Scheduled re-scrape completed: %d total new images, %d total new faces", 
+                   total_new_images, total_new_faces)
+        
+        # Update next run time
+        update_next_run_time()
+        
+    except Exception as e:
+        logger.exception("Error in scheduled_rescrape: %s", str(e))
+
+
+def update_next_run_time():
+    """Update the next scheduled run time."""
+    jobs = scheduler.get_jobs()
+    if jobs:
+        auto_rescrape_status['next_run'] = jobs[0].next_run_time.isoformat() if jobs[0].next_run_time else None
+
+
+def setup_scheduler():
+    """Setup the APScheduler with configured schedule."""
+    if not config.AUTO_RESCRAPE_ENABLED:
+        logger.info("Auto re-scraping is disabled in config")
+        return
+    
+    # Parse time from config (format: "23:00" for 11 PM)
+    hour, minute = map(int, config.AUTO_RESCRAPE_TIME.split(':'))
+    
+    # Calculate day of week for bi-weekly schedule
+    # Run every 14 days starting from a reference date
+    trigger = CronTrigger(
+        day_of_week='*',  # Every day (but we'll use interval to make it every 14 days)
+        hour=hour,
+        minute=minute
+    )
+    
+    # For bi-weekly, we'll use interval trigger instead
+    from apscheduler.triggers.interval import IntervalTrigger
+    trigger = IntervalTrigger(
+        days=config.AUTO_RESCRAPE_INTERVAL_DAYS,
+        start_date=datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+    )
+    
+    scheduler.add_job(
+        func=scheduled_rescrape,
+        trigger=trigger,
+        id='auto_rescrape',
+        name='Automatic Website Re-scraping',
+        replace_existing=True
+    )
+    
+    update_next_run_time()
+    logger.info("Scheduled auto re-scraping: every %d days at %s", 
+               config.AUTO_RESCRAPE_INTERVAL_DAYS, config.AUTO_RESCRAPE_TIME)
+    logger.info("Next run: %s", auto_rescrape_status['next_run'])
+
+
+# Existing scraping functions
 
 if __name__ == '__main__':
-    print("\n" + "=" * 70)
-    print("ADMIN DASHBOARD")
-    print("=" * 70)
-    print(f"Websites: {db.get_statistics().get('active_websites', 0)}")
-    print(f"Faces: {faiss_mgr.get_total_vectors()}")
-    print("\nhttp://localhost:5001")
-    print("=" * 70 + "\n")
-    app.run(host='0.0.0.0', port=5001, debug=False)
+    print("\n" + "="*70)
+    print("ADMIN DASHBOARD - PRIVACY EXPOSURE CHECKER")
+    print("="*70)
+    print("Starting web interface...")
+    print("Access at: http://localhost:5001")
+    
+    # Setup automatic re-scraping scheduler
+    setup_scheduler()
+    
+    if auto_rescrape_status['enabled']:
+        print(f"Auto re-scraping: ENABLED (every {auto_rescrape_status['interval_days']} days)")
+        if auto_rescrape_status['next_run']:
+            print(f"Next run: {auto_rescrape_status['next_run']}")
+    else:
+        print("Auto re-scraping: DISABLED")
+    
+    print("="*70 + "\n")
+    
+    try:
+        app.run(host='0.0.0.0', port=5001, debug=False)
+    finally:
+        # Shutdown scheduler on exit
+        scheduler.shutdown()

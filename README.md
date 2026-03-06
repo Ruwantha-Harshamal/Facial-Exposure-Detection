@@ -66,12 +66,77 @@ This creates a `.env` file with secure random keys.
 
 ### 3. Start the Application
 
+**User Interface:**
 ```bash
 cd User/backend
 python app.py
 ```
 
 Visit **http://localhost:5000**
+
+**Admin Dashboard:**
+```bash
+python admin_dashboard.py
+```
+
+Visit **http://localhost:5001**
+
+---
+
+## 🤖 Automatic Re-scraping
+
+The system supports intelligent automatic re-scraping to keep the database updated with fresh images.
+
+### Features
+
+- **Smart Incremental Updates:** Only processes new images, skips existing ones
+- **Scheduled Execution:** Runs automatically every 14 days at 11:00 PM (configurable)
+- **Background Processing:** Runs in the background while admin dashboard is active
+- **Manual Override:** Re-scrape individual or all websites on-demand via dashboard
+- **Stale Website Detection:** Automatically identifies websites needing updates
+
+### Configuration
+
+Edit `config.py` to customize automatic re-scraping:
+
+```python
+# Automatic Re-scraping Settings
+AUTO_RESCRAPE_ENABLED = True           # Enable/disable auto re-scraping
+AUTO_RESCRAPE_INTERVAL_DAYS = 14       # Run every 14 days (2 weeks)
+AUTO_RESCRAPE_TIME = "23:00"          # Run at 11:00 PM
+AUTO_RESCRAPE_MAX_WEBSITES = 50       # Max websites per run (safety limit)
+RESCRAPE_AFTER_DAYS = 30              # Mark websites as "stale" after 30 days
+```
+
+### How It Works
+
+1. **Dashboard Must Be Running:** APScheduler requires the admin dashboard to be active
+2. **Automatic Trigger:** Scheduler fires every 14 days at configured time
+3. **Smart Processing:** System compares current images with database, processes only new ones
+4. **Efficient Updates:** Only new faces are indexed, existing data remains untouched
+5. **Live Monitoring:** View real-time logs in the "Activity Log" section
+
+### Manual Re-scraping
+
+**Via Admin Dashboard:**
+- Single website: Click "♻️ Re-scrape" button
+- Stale websites: Use "Update All Stale Websites" button
+- All websites: Manual bulk re-scrape available
+
+**Via Command Line:**
+```bash
+python process_batch.py --urls websites.txt --skip-errors
+```
+
+### Status Monitoring
+
+The admin dashboard displays:
+- ✅ Auto re-scraping status (ENABLED/DISABLED)
+- 📅 Next scheduled run time
+- 🕒 Last run timestamp
+- ⚠️ List of stale websites (>30 days old)
+
+**Note:** To enable automatic re-scraping, keep the admin dashboard running continuously (recommended for production servers).
 
 ---
 

@@ -28,6 +28,9 @@ Werkzeug==3.0.1
 Flask-Limiter==3.5.0      # Rate limiting protection
 Flask-CORS==4.0.0         # Cross-Origin Resource Sharing
 Flask-Talisman==1.1.0     # HTTPS enforcement & security headers
+
+# Scheduling
+APScheduler==3.10.4       # Background job scheduling
 python-dotenv>=1.0.0      # Environment variable management
 
 # Production Server (Optional)

@@ -147,14 +147,34 @@ def process_website(
         db.update_website_status(website_id, 'completed', 0, 0)
         return
     
-    logger.info(f"Processing {len(image_urls)} images...")
+    # SMART MERGE: Filter out existing images to avoid re-processing
+    old_image_count = db.get_website_image_count(website_id)
+    new_image_urls = db.filter_new_images(image_urls)
+    
+    logger.info(f"Total images found: {len(image_urls)}")
+    logger.info(f"  - New images: {len(new_image_urls)}")
+    logger.info(f"  - Existing images (skipped): {len(image_urls) - len(new_image_urls)}")
+    
+    # Detect suspicious changes (possible website redesign or scraper issue)
+    if old_image_count > 0 and len(image_urls) < old_image_count * 0.5:
+        logger.warning(f"⚠️  ALERT: Image count dropped significantly!")
+        logger.warning(f"   Old: {old_image_count} images, New: {len(image_urls)} images")
+        logger.warning(f"   Possible website redesign or scraper issue!")
+    
+    if not new_image_urls:
+        logger.info("✓ No new images to process")
+        db.update_website_timestamp(website_id)
+        db.update_website_status(website_id, 'completed', len(image_urls), 0)
+        return
+    
+    logger.info(f"Processing {len(new_image_urls)} new images...")
     
     total_faces = 0
     images_with_faces = 0
     
-    # Process each image
-    for i, image_url in enumerate(image_urls, 1):
-        logger.info(f"\n[{i}/{len(image_urls)}] {image_url}")
+    # Process each NEW image only
+    for i, image_url in enumerate(new_image_urls, 1):
+        logger.info(f"\n[{i}/{len(new_image_urls)}] {image_url}")
         
         # Download image to RAM
         image_bytes, width, height = scraper.download_image(image_url, website_url)
@@ -192,8 +212,18 @@ def process_website(
             
             total_faces += 1
     
+    # Update website timestamp (mark as freshly scraped)
+    db.update_website_timestamp(website_id)
+    
     # Update website status
-    db.update_website_status(website_id, 'completed', len(image_urls), total_faces)
+    total_images_count = db.get_website_image_count(website_id)
+    db.update_website_status(website_id, 'completed', total_images_count, total_faces)
+    
+    # Log summary
+    logger.info(f"\n✓ Website processing complete:")
+    logger.info(f"  - New images processed: {len(new_image_urls)}")
+    logger.info(f"  - New faces detected: {total_faces}")
+    logger.info(f"  - Total images in DB: {total_images_count}")
     
     # Save FAISS index
     faiss.save_index()

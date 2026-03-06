@@ -129,6 +129,20 @@ DETECT_SVG_IMAGES = os.getenv('DETECT_SVG_IMAGES', 'true').lower() == 'true'
 IMAGE_URL_PATTERN = r'(?:([^:\/?#]+):)?(?:\/\/([^\/?#]*))?([^?#]*\.(?:bmp|gif|ico|jfif|jpe?g|png|svg|tiff?|webp|avif))(?:\?([^#]*))?(?:#(.*))?'
 
 # ═══════════════════════════════════════════════════════════
+#  RE-SCRAPING CONFIGURATION
+# ═══════════════════════════════════════════════════════════
+
+# Days before considering a website "stale" and needing re-scrape
+RESCRAPE_AFTER_DAYS = int(os.getenv('RESCRAPE_AFTER_DAYS', '30'))
+
+# Automatic re-scraping settings
+AUTO_RESCRAPE_ENABLED = os.getenv('AUTO_RESCRAPE_ENABLED', 'true').lower() == 'true'
+AUTO_RESCRAPE_INTERVAL_DAYS = int(os.getenv('AUTO_RESCRAPE_INTERVAL_DAYS', '14'))  # Every 2 weeks
+AUTO_RESCRAPE_TIME = os.getenv('AUTO_RESCRAPE_TIME', '23:00')  # 11 PM (HH:MM format)
+AUTO_RESCRAPE_MAX_WEBSITES = int(os.getenv('AUTO_RESCRAPE_MAX_WEBSITES', '50'))  # Safety limit
+AUTO_RESCRAPE_TIMEOUT_HOURS = int(os.getenv('AUTO_RESCRAPE_TIMEOUT_HOURS', '4'))  # Max 4 hours
+
+# ═══════════════════════════════════════════════════════════
 #  LOGGING CONFIGURATION
 # ═══════════════════════════════════════════════════════════
 
