@@ -92,6 +92,14 @@ RATE_LIMIT_SECONDS = float(os.getenv('RATE_LIMIT_SECONDS', '0.2'))
 # Seconds to wait for JavaScript to load page
 PAGE_LOAD_WAIT_SECONDS = int(os.getenv('PAGE_LOAD_WAIT_SECONDS', '5'))
 
+# Number of progressive scrolls to trigger lazy-loading
+# Higher = more images found, but slower scraping
+# Recommended: 3-5 for balance, 8-10 for maximum coverage
+SCROLL_COUNT = int(os.getenv('SCROLL_COUNT', '5'))
+
+# Delay between scrolls (seconds) - wait for lazy images to load
+SCROLL_DELAY = float(os.getenv('SCROLL_DELAY', '1.5'))
+
 # Run browser in headless mode
 HEADLESS_BROWSER = os.getenv('HEADLESS_BROWSER', 'true').lower() == 'true'
 
@@ -100,6 +108,25 @@ USER_AGENT = "OSINT-Privacy-Scanner/2.0 (+https://github.com/privacy-scanner)"
 
 # Request timeout in seconds
 REQUEST_TIMEOUT = 20
+
+# ═══════════════════════════════════════════════════════════
+#  ADVANCED IMAGE DETECTION (Chrome Extension Techniques)
+# ═══════════════════════════════════════════════════════════
+
+# Enable CSS background-image detection (scans all elements)
+# Adds 2-3s per page but finds 20-30% more images
+DETECT_CSS_BACKGROUNDS = os.getenv('DETECT_CSS_BACKGROUNDS', 'true').lower() == 'true'
+
+# Enable link-to-image detection (<a href="image.jpg">)
+# Adds ~1s per page, finds 5-10% more (often higher resolution)
+DETECT_LINKED_IMAGES = os.getenv('DETECT_LINKED_IMAGES', 'true').lower() == 'true'
+
+# Enable SVG image detection
+# Adds ~0.5s per page, finds 2-5% more (mostly logos/icons)
+DETECT_SVG_IMAGES = os.getenv('DETECT_SVG_IMAGES', 'true').lower() == 'true'
+
+# Image URL validation regex (based on Chrome Image Downloader extension)
+IMAGE_URL_PATTERN = r'(?:([^:\/?#]+):)?(?:\/\/([^\/?#]*))?([^?#]*\.(?:bmp|gif|ico|jfif|jpe?g|png|svg|tiff?|webp|avif))(?:\?([^#]*))?(?:#(.*))?'
 
 # ═══════════════════════════════════════════════════════════
 #  LOGGING CONFIGURATION

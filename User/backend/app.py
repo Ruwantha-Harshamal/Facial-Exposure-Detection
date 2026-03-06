@@ -9,16 +9,12 @@ import os
 import sys
 import logging
 import secrets
-import atexit
 from flask import Flask, request, jsonify, send_from_directory, send_file
-from werkzeug.utils import secure_filename
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_cors import CORS
 from flask_talisman import Talisman
-import uuid
 from io import BytesIO
-from PIL import Image
 from functools import wraps
 
 # Add parent directory to path to import admin backend modules
@@ -125,48 +121,6 @@ MAX_IMAGE_PIXELS = 50_000_000  # 50 megapixels (prevent image bombs)
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# SECURITY: Track temporary files for cleanup
-temp_files = set()
-
-def cleanup_temp_files():
-    """Cleanup temporary files on exit"""
-    for filepath in temp_files:
-        try:
-            if os.path.exists(filepath):
-                os.remove(filepath)
-                logger.debug("Cleaned up temp file: %s", filepath)
-        except (OSError, IOError) as e:
-            logger.error("Failed to cleanup temp file: %s", e)
-
-atexit.register(cleanup_temp_files)
-
-# SECURITY: Validate image file content
-def validate_image(file_path):
-    """
-    Validate that uploaded file is a legitimate image
-    Prevents image bombs and malicious files
-    """
-    try:
-        with Image.open(file_path) as img:
-            img.verify()  # Verify it's actually an image
-        
-        # Reopen after verify (verify closes the file)
-        with Image.open(file_path) as img:
-            # Check dimensions (prevent image bombs)
-            if img.width * img.height > MAX_IMAGE_PIXELS:
-                logger.warning("Image too large: %dx%d pixels", img.width, img.height)
-                return False
-            
-            # Check format is allowed
-            if img.format.lower() not in ['jpeg', 'jpg', 'png']:
-                logger.warning("Invalid image format: %s", img.format)
-                return False
-        
-        return True
-    except (OSError, IOError, ValueError) as e:
-        logger.error("Image validation failed: %s", e)
-        return False
-
 # Initialize components (shared with admin backend)
 logger.info("Initializing components...")
 db = DatabaseManager(db_path=config.SQLITE_DB_PATH, db_type=config.DB_TYPE)
@@ -268,40 +222,52 @@ def upload():
     if not allowed_file(file.filename):
         return jsonify({'success': False, 'error': 'Invalid file type. Only JPG, JPEG, PNG allowed'}), 400
     
-    # SECURITY: Validate file size before saving (request.content_length is unreliable for multipart)
-    file.seek(0, 2)  # Seek to end
-    file_size = file.tell()
-    file.seek(0)  # Seek back to start
+    # SECURITY: Read file directly to RAM (no disk storage!)
+    photo_bytes = file.read()
     
-    if file_size > MAX_FILE_SIZE:
+    # SECURITY: Validate file size
+    if len(photo_bytes) > MAX_FILE_SIZE:
         return jsonify({
             'success': False, 
             'error': f'File too large. Maximum size is {MAX_FILE_SIZE // (1024*1024)}MB'
         }), 413
     
-    # SECURITY: Generate secure random filename (prevent path traversal)
-    filename = secure_filename(f"{uuid.uuid4()}.jpg")
-    temp_path = os.path.join(UPLOAD_FOLDER, filename)
-    
-    # SECURITY: Track temp file for cleanup
-    temp_files.add(temp_path)
+    logger.info("File uploaded to RAM successfully (%d bytes)", len(photo_bytes))
     
     try:
-        file.save(temp_path)
-        logger.info("File uploaded successfully")
+        # SECURITY: Validate image content in RAM before processing
+        from PIL import Image
+        import io
         
-        # SECURITY: Validate file content before processing
-        if not validate_image(temp_path):
-            temp_files.discard(temp_path)
-            os.remove(temp_path)
+        try:
+            img = Image.open(io.BytesIO(photo_bytes))
+            img.verify()  # Verify it's actually an image
+            
+            # Reopen after verify (verify closes the file)
+            img = Image.open(io.BytesIO(photo_bytes))
+            
+            # Check dimensions (prevent image bombs)
+            if img.width * img.height > MAX_IMAGE_PIXELS:
+                logger.warning("Image too large: %dx%d pixels", img.width, img.height)
+                return jsonify({
+                    'success': False,
+                    'error': f'Image too large. Maximum is {MAX_IMAGE_PIXELS} pixels.'
+                }), 400
+            
+            # Check format is allowed
+            if img.format.lower() not in ['jpeg', 'jpg', 'png']:
+                logger.warning("Invalid image format: %s", img.format)
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid image format. Only JPG and PNG allowed.'
+                }), 400
+                
+        except Exception as e:
+            logger.error("Image validation failed: %s", e)
             return jsonify({
                 'success': False,
                 'error': 'Invalid image file. Please upload a valid JPG or PNG image.'
             }), 400
-        
-        # Load photo into RAM
-        with open(temp_path, 'rb') as f:
-            photo_bytes = f.read()
         
         # Detect face using MTCNN (same as admin backend)
         logger.info("Detecting face...")
@@ -310,7 +276,6 @@ def upload():
         logger.info("Face detection returned %d results", len(face_results) if face_results else 0)
         
         if not face_results or len(face_results) == 0:
-            os.remove(temp_path)  # Delete temp file
             return jsonify({
                 'success': False,
                 'error': 'No face detected in photo. Please upload a clear photo with a visible face.'
@@ -326,7 +291,6 @@ def upload():
             
             if not faces or len(faces) == 0:
                 logger.error("Sorting resulted in empty list")
-                os.remove(temp_path)
                 return jsonify({
                     'success': False,
                     'error': 'No valid faces after sorting'
@@ -337,7 +301,6 @@ def upload():
             
             if len(face_data) != 4:
                 logger.error("Unexpected face data format: expected 4 elements, got %d", len(face_data))
-                os.remove(temp_path)
                 return jsonify({
                     'success': False,
                     'error': 'Internal error: Invalid face data format'
@@ -347,7 +310,6 @@ def upload():
             
         except (IndexError, ValueError, TypeError) as e:
             logger.error("Error processing face data: %s", e, exc_info=True)
-            os.remove(temp_path)
             return jsonify({
                 'success': False,
                 'error': f'Internal error processing face data: {str(e)}'
@@ -364,7 +326,6 @@ def upload():
         
         if total_vectors == 0:
             logger.warning("No vectors in FAISS index")
-            os.remove(temp_path)
             return jsonify({
                 'success': True,
                 'status': 'safe',
@@ -384,7 +345,6 @@ def upload():
         # Check if search returned results
         if not similarities or not face_ids or len(similarities) == 0 or len(face_ids) == 0:
             logger.info("No matches found above similarity threshold")
-            os.remove(temp_path)
             return jsonify({
                 'success': True,
                 'status': 'safe',
@@ -430,9 +390,8 @@ def upload():
                     'website_name': row[5] or row[4]
                 })
         
-        # Delete user's photo (PRIVACY!)
-        os.remove(temp_path)
-        logger.info("✓ Deleted temp file: %s", temp_path)
+        # PRIVACY: Photo was processed entirely in RAM - never saved to disk!
+        logger.info("✓ Processing complete - photo processed in RAM only (never saved to disk)")
         
         # Log results
         logger.info("Found %d database matches", len(matches))
@@ -457,10 +416,6 @@ def upload():
             })
     
     except (IOError, OSError, RuntimeError) as e:
-        # Clean up temp file on error
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        
         logger.error("Error processing upload: %s", e, exc_info=True)
         return jsonify({
             'success': False,

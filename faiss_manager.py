@@ -196,6 +196,28 @@ class FAISSManager:
             return 0
         return self.index.ntotal
     
+    def remove_face_ids(self, face_ids: List[int]):
+        """
+        Remove specific face IDs from the FAISS index.
+        This leaves "gaps" in the index but is much faster than rebuilding.
+        
+        Args:
+            face_ids: List of face IDs to remove
+        """
+        if self.index is None or len(face_ids) == 0:
+            return
+        
+        # Convert to numpy array
+        face_ids_array = np.array(face_ids, dtype=np.int64)
+        
+        # Remove IDs from index
+        # Note: This doesn't physically remove vectors, just marks them as deleted
+        # The index will have "gaps" but searches will ignore deleted IDs
+        self.index.remove_ids(face_ids_array)
+        
+        logger.info("Removed %d face IDs from FAISS index (now has %d vectors)", 
+                   len(face_ids), self.index.ntotal)
+    
     def clear_index(self):
         """Clear all vectors from index"""
         self.create_index()

@@ -8,10 +8,13 @@ Handles all SQLite database operations
 import os
 import sqlite3
 import io
+import logging
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 import numpy as np
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
@@ -355,6 +358,96 @@ class DatabaseManager:
                 results.append((face_id, embedding))
         
         return results
+    
+    def get_face_ids_by_website(self, website_id: int) -> List[int]:
+        """
+        Get all face IDs for a specific website.
+        Used for FAISS deletion when deleting a website.
+        
+        Args:
+            website_id: ID of website
+            
+        Returns:
+            List of face IDs
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """SELECT f.id FROM faces f
+               JOIN images i ON f.image_id = i.id
+               WHERE i.website_id = ? AND f.deleted_at IS NULL""",
+            (website_id,)
+        )
+        return [row[0] for row in cursor.fetchall()]
+    
+    def delete_website_complete(self, website_id: int) -> Dict:
+        """
+        Completely delete a website and all related data.
+        This is a HARD DELETE (permanent removal, not soft delete).
+        
+        Deletes:
+        - Website record
+        - All images
+        - All faces
+        - All face thumbnails
+        - All embeddings
+        
+        Note: FAISS vectors must be deleted separately by caller.
+        
+        Args:
+            website_id: ID of website to delete
+            
+        Returns:
+            Dictionary with deletion statistics
+        """
+        cursor = self.conn.cursor()
+        
+        # Get statistics before deletion
+        cursor.execute(
+            """SELECT COUNT(DISTINCT i.id) as images, COUNT(DISTINCT f.id) as faces
+               FROM images i
+               LEFT JOIN faces f ON i.id = f.image_id
+               WHERE i.website_id = ? AND i.deleted_at IS NULL""",
+            (website_id,)
+        )
+        stats = cursor.fetchone()
+        image_count = stats[0] if stats else 0
+        face_count = stats[1] if stats else 0
+        
+        # Delete in correct order (respect foreign keys)
+        # 1. Delete embeddings
+        cursor.execute(
+            """DELETE FROM embeddings WHERE face_id IN (
+               SELECT f.id FROM faces f JOIN images i ON f.image_id = i.id WHERE i.website_id = ?)""",
+            (website_id,)
+        )
+        
+        # 2. Delete face thumbnails
+        cursor.execute(
+            """DELETE FROM face_thumbnails WHERE face_id IN (
+               SELECT f.id FROM faces f JOIN images i ON f.image_id = i.id WHERE i.website_id = ?)""",
+            (website_id,)
+        )
+        
+        # 3. Delete faces
+        cursor.execute(
+            "DELETE FROM faces WHERE image_id IN (SELECT id FROM images WHERE website_id = ?)",
+            (website_id,)
+        )
+        
+        # 4. Delete images
+        cursor.execute("DELETE FROM images WHERE website_id = ?", (website_id,))
+        
+        # 5. Delete website
+        cursor.execute("DELETE FROM websites WHERE id = ?", (website_id,))
+        
+        self.conn.commit()
+        
+        logger.info("Deleted website %d: %d images, %d faces", website_id, image_count, face_count)
+        
+        return {
+            'deleted_images': image_count,
+            'deleted_faces': face_count
+        }
     
     # ========================================
     # QUERY OPERATIONS

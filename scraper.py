@@ -135,33 +135,59 @@ class WebScraper:
             logger.info(f"Waiting {config.PAGE_LOAD_WAIT_SECONDS}s for page to load...")
             time.sleep(config.PAGE_LOAD_WAIT_SECONDS)
             
-            # Scroll to trigger lazy loading
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
+            # ENHANCED: Multiple progressive scrolls to trigger lazy loading
+            # (Similar to Chrome Image Downloader extensions)
+            logger.info("Performing progressive scroll to load lazy images...")
+            scroll_count = config.SCROLL_COUNT
+            scroll_delay = config.SCROLL_DELAY
+            page_height = driver.execute_script("return document.body.scrollHeight")
+            
+            for i in range(scroll_count):
+                # Scroll to percentage of page
+                scroll_position = (page_height // scroll_count) * (i + 1)
+                driver.execute_script(f"window.scrollTo(0, {scroll_position});")
+                time.sleep(scroll_delay)  # Wait for lazy images to load
+            
+            # Final scroll to top
             driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(1)
             
-            # Extract image URLs
-            img_elements = driver.find_elements(By.TAG_NAME, "img")
-            source_elements = driver.find_elements(By.TAG_NAME, "source")
+            # Extract image URLs using multiple detection methods
+            # (Mimics Chrome Image Downloader extension behavior)
+            logger.info("Detecting images using multiple methods...")
             
             urls = []
             
-            # From <img> tags
+            # METHOD 1: <img> tags (including lazy-loading attributes)
+            img_elements = driver.find_elements(By.TAG_NAME, "img")
+            logger.info(f"Found {len(img_elements)} <img> elements")
+            
             for img in img_elements:
-                src = img.get_attribute("src") or img.get_attribute("data-src")
-                srcset = img.get_attribute("srcset")
-                
+                # Standard src attribute
+                src = img.get_attribute("src")
                 if src and src.startswith("http"):
                     urls.append(src)
                 
+                # Lazy-loading attributes (data-src, data-lazy-src, etc.)
+                lazy_src = (img.get_attribute("data-src") or 
+                           img.get_attribute("data-lazy-src") or
+                           img.get_attribute("data-original") or
+                           img.get_attribute("data-lazy"))
+                if lazy_src and lazy_src.startswith("http"):
+                    urls.append(lazy_src)
+                
+                # srcset for responsive images
+                srcset = img.get_attribute("srcset")
                 if srcset:
                     for candidate in srcset.split(','):
                         part = candidate.strip().split(' ')[0]
                         if part and part.startswith("http"):
                             urls.append(part)
             
-            # From <source> tags
+            # METHOD 2: <source> tags (HTML5 picture elements)
+            source_elements = driver.find_elements(By.TAG_NAME, "source")
+            logger.info(f"Found {len(source_elements)} <source> elements")
+            
             for source in source_elements:
                 src = source.get_attribute("src") or source.get_attribute("srcset")
                 if src:
@@ -170,13 +196,97 @@ class WebScraper:
                         if part and part.startswith("http"):
                             urls.append(part)
             
+            # METHOD 3: CSS background images (Chrome extension technique!)
+            bg_images = []
+            if config.DETECT_CSS_BACKGROUNDS:
+                logger.info("Scanning for CSS background images...")
+                bg_images = driver.execute_script("""
+                    let images = [];
+                    // Check all elements for background images
+                    document.querySelectorAll('*').forEach(function(element) {
+                        let style = window.getComputedStyle(element);
+                        let bgImage = style.backgroundImage;
+                        
+                        if (bgImage && bgImage !== 'none' && bgImage.includes('url')) {
+                            // Extract URL from: url("https://example.com/image.jpg")
+                            let matches = bgImage.match(/url\\(['"]?(.*?)['"]?\\)/g);
+                            if (matches) {
+                                matches.forEach(function(match) {
+                                    let url = match.replace(/url\\(['"]?|['"]?\\)/g, '');
+                                    if (url.startsWith('http')) {
+                                        images.push(url);
+                                    }
+                                });
+                            }
+                        }
+                    });
+                    return images;
+                """)
+                
+                if bg_images:
+                    logger.info(f"Found {len(bg_images)} CSS background images")
+                    urls.extend(bg_images)
+            
+            # METHOD 4: Links to images (<a href="photo.jpg">)
+            # Chrome extension technique - finds high-res versions
+            link_images = []
+            if config.DETECT_LINKED_IMAGES:
+                logger.info("Scanning for links to images...")
+                link_elements = driver.find_elements(By.TAG_NAME, "a")
+                
+                import re
+                image_pattern = re.compile(config.IMAGE_URL_PATTERN, re.IGNORECASE)
+                
+                for link in link_elements:
+                    href = link.get_attribute("href")
+                    if href and image_pattern.search(href):
+                        link_images.append(href)
+                
+                if link_images:
+                    logger.info(f"Found {len(link_images)} linked images")
+                    urls.extend(link_images)
+            
+            # METHOD 5: SVG images (<svg><image xlink:href="..."></svg>)
+            # Chrome extension technique - captures SVG embedded images
+            svg_images = []
+            if config.DETECT_SVG_IMAGES:
+                logger.info("Scanning for SVG images...")
+                svg_images = driver.execute_script("""
+                    let images = [];
+                    // SVG <image> elements
+                    document.querySelectorAll('svg image').forEach(function(img) {
+                        let href = img.getAttribute('xlink:href') || 
+                                   img.getAttribute('href') ||
+                                   img.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+                        if (href && href.startsWith('http')) {
+                            images.push(href);
+                        }
+                    });
+                    return images;
+                """)
+                
+                if svg_images:
+                    logger.info(f"Found {len(svg_images)} SVG images")
+                    urls.extend(svg_images)
+            
             # Deduplicate and filter
             seen = set()
             result = []
             for u in urls:
-                if u and u not in seen and not u.startswith('data:'):
+                # Filter out data URLs, icons, and duplicates
+                if (u and u not in seen and 
+                    not u.startswith('data:') and
+                    not any(skip in u.lower() for skip in ['icon', 'logo', 'sprite', 'blank.gif'])):
                     seen.add(u)
                     result.append(u)
+            
+            logger.info(f"✓ Total unique images found: {len(result)}")
+            logger.info(f"  - <img> tags: {len(img_elements)}")
+            logger.info(f"  - <source> tags: {len(source_elements)}")
+            logger.info(f"  - CSS backgrounds: {len(bg_images)}")
+            logger.info(f"  - Linked images: {len(link_images)}")
+            logger.info(f"  - SVG images: {len(svg_images)}")
+            logger.info(f"  - After deduplication: {len(result)}")
             
             logger.info(f"Found {len(result)} unique image URLs")
             return result
