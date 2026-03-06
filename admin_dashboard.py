@@ -176,7 +176,7 @@ DASHBOARD_TEMPLATE = """
         <div class="section">
             <h2>📋 Bulk Add</h2>
             <form id="bulkForm">
-                <textarea id="bulkUrls" rows="5" placeholder="https://site1.com&#10;https://site2.com" required></textarea>
+                <textarea id="bulkUrls" rows="5" placeholder="Enter URLs (one per line)" required></textarea>
                 <button type="submit" class="btn">Add to Database</button>
             </form>
             <div id="bulkMsg"></div>
@@ -204,7 +204,7 @@ DASHBOARD_TEMPLATE = """
         
         document.getElementById('bulkForm').onsubmit = async (e) => {
             e.preventDefault();
-            const urls = document.getElementById('bulkUrls').value.split('\\n').filter(u => u.trim());
+            const urls = document.getElementById('bulkUrls').value.split(/\\r?\\n/).filter(u => u.trim());
             const res = await fetch('/api/bulk_scrape', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -236,7 +236,7 @@ DASHBOARD_TEMPLATE = """
         }
         
         async function rescrape(url, websiteId) {
-            if (!confirm('Re-scrape ' + url + '?\n\nThis will find and process only NEW images (smart merge).')) return;
+            if (!confirm('Re-scrape ' + url + '?\\n\\nThis will find and process only NEW images (smart merge).')) return;
             const res = await fetch('/api/rescrape_website', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -244,7 +244,7 @@ DASHBOARD_TEMPLATE = """
             });
             const data = await res.json();
             if (data.success) {
-                alert(`✓ Re-scrape complete!\n\nNew images: ${data.new_images}\nNew faces: ${data.new_faces}\nTotal images: ${data.total_images}`);
+                alert(`✓ Re-scrape complete!\\n\\nNew images: ${data.new_images}\\nNew faces: ${data.new_faces}\\nTotal images: ${data.total_images}`);
                 location.reload();
             } else {
                 alert('✗ Error: ' + data.error);
@@ -252,11 +252,11 @@ DASHBOARD_TEMPLATE = """
         }
         
         async function rescrapeStale() {
-            if (!confirm('Update all stale websites?\n\nThis will re-scrape all websites older than {{ rescrape_days }} days.')) return;
+            if (!confirm('Update all stale websites?\\n\\nThis will re-scrape all websites older than {{ rescrape_days }} days.')) return;
             const res = await fetch('/api/rescrape_stale', {method: 'POST'});
             const data = await res.json();
             if (data.success) {
-                alert(`✓ Batch update complete!\n\nWebsites updated: ${data.updated_count}\nNew images: ${data.new_images}\nNew faces: ${data.new_faces}`);
+                alert(`✓ Batch update complete!\\n\\nWebsites updated: ${data.updated_count}\\nNew images: ${data.new_images}\\nNew faces: ${data.new_faces}`);
                 location.reload();
             } else {
                 alert('✗ Error: ' + data.error);
@@ -265,17 +265,17 @@ DASHBOARD_TEMPLATE = """
         
         async function deleteWebsite(websiteId, url, imageCount, faceCount) {
             // Detailed confirmation dialog
-            const msg = `⚠️ PERMANENT DELETION WARNING ⚠️\n\n` +
-                `Website: ${url}\n` +
-                `Images: ${imageCount}\n` +
-                `Faces: ${faceCount}\n\n` +
-                `This will permanently delete:\n` +
-                `✗ Website record\n` +
-                `✗ All ${imageCount} images\n` +
-                `✗ All ${faceCount} faces and embeddings\n` +
-                `✗ All face thumbnails\n` +
-                `✗ All FAISS vectors for this website\n\n` +
-                `THIS CANNOT BE UNDONE!\n\n` +
+            const msg = `⚠️ PERMANENT DELETION WARNING ⚠️\\n\\n` +
+                `Website: ${url}\\n` +
+                `Images: ${imageCount}\\n` +
+                `Faces: ${faceCount}\\n\\n` +
+                `This will permanently delete:\\n` +
+                `✗ Website record\\n` +
+                `✗ All ${imageCount} images\\n` +
+                `✗ All ${faceCount} faces and embeddings\\n` +
+                `✗ All face thumbnails\\n` +
+                `✗ All FAISS vectors for this website\\n\\n` +
+                `THIS CANNOT BE UNDONE!\\n\\n` +
                 `Type "DELETE" to confirm:`;
             
             const confirmation = prompt(msg);
@@ -296,9 +296,9 @@ DASHBOARD_TEMPLATE = """
             const data = await res.json();
             
             if (data.success) {
-                alert(`✅ Deleted successfully!\n\n` +
-                      `Images deleted: ${data.deleted_images}\n` +
-                      `Faces deleted: ${data.deleted_faces}\n` +
+                alert(`✅ Deleted successfully!\\n\\n` +
+                      `Images deleted: ${data.deleted_images}\\n` +
+                      `Faces deleted: ${data.deleted_faces}\\n` +
                       `FAISS vectors removed: ${data.deleted_face_ids_count}`);
                 // Remove row from table
                 if (row) row.remove();
@@ -637,6 +637,15 @@ def status():
     return jsonify({
         'jobs': scraping_jobs,
         'logs': scraping_logs[-100:]  # Last 100 log entries
+    })
+
+
+@app.route('/api/scraping_status')
+@limiter.exempt
+def scraping_status():
+    """Get current scraping logs for live updates."""
+    return jsonify({
+        'logs': scraping_logs[-50:]  # Last 50 log entries
     })
 
 
