@@ -51,6 +51,10 @@ batch_processing.log
 *_backup
 *.bak
 
+# Temporary runtime files
+admin_pid.txt
+*.pid
+
 # Old/temporary files
 *_old.*
 *.old
